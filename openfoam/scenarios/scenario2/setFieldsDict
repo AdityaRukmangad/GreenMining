@@ -1,0 +1,29 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+  =========                 |
+  \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox
+   \\    /   O peration     | Version:  v8
+    \\  /    A nd           | Web:      www.OpenFOAM.org
+     \\/     M anipulation  |
+\*---------------------------------------------------------------------------*/
+FoamFile { version 2.0; format ascii; class dictionary; object setFieldsDict; }
+// Scenario 2 - Moderate Syngas Leak. Gas pocket near junction. WARNING zones expected.
+defaultFieldValues
+(
+    volScalarFieldValue CH4  0
+    volScalarFieldValue CO   0
+    volScalarFieldValue H2   0
+);
+regions
+(
+    boxToCell
+    {
+        box  (20 0.5 0) (28 3.5 3);
+        fieldValues
+        (
+            volScalarFieldValue CH4   0.020
+            volScalarFieldValue CO    0.0003
+            volScalarFieldValue H2    0.010
+        );
+    }
+);
+// ************************************************************************* //

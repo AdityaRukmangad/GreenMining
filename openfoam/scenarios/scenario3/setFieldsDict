@@ -1,0 +1,39 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+  =========                 |
+  \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox
+   \\    /   O peration     | Version:  v8
+    \\  /    A nd           | Web:      www.OpenFOAM.org
+     \\/     M anipulation  |
+\*---------------------------------------------------------------------------*/
+FoamFile { version 2.0; format ascii; class dictionary; object setFieldsDict; }
+// Scenario 3 - Ventilation Failure. Gas throughout tunnel. DANGER zones expected.
+defaultFieldValues
+(
+    volScalarFieldValue CH4  0
+    volScalarFieldValue CO   0
+    volScalarFieldValue H2   0
+);
+regions
+(
+    boxToCell
+    {
+        box  (0 0 0) (60 4 3);
+        fieldValues
+        (
+            volScalarFieldValue CH4   0.030
+            volScalarFieldValue CO    0.0010
+            volScalarFieldValue H2    0.015
+        );
+    }
+    boxToCell
+    {
+        box  (28 4 0) (38 16 3);
+        fieldValues
+        (
+            volScalarFieldValue CH4   0.040
+            volScalarFieldValue CO    0.0015
+            volScalarFieldValue H2    0.022
+        );
+    }
+);
+// ************************************************************************* //

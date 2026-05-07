@@ -1,0 +1,143 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+  =========                 |
+  \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox
+   \\    /   O peration     | Version:  v8
+    \\  /    A nd           | Web:      www.OpenFOAM.org
+     \\/     M anipulation  |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    location    "system";
+    object      blockMeshDict;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+//
+// Underground mine geometry (all dimensions in metres):
+//
+//  Y
+//  ^   Side chamber (dead-end) - Block 3
+//  |   x=[28,38], y=[4,16], z=[0,3]
+//  |   +-----------+
+//  |   |           |  <- dead end walls, gas accumulates here
+//  |   |           |
+//  |   +-----+-----+
+//  |         |
+//  |         | (junction - Block 1)
+//  |         |
+//  +----+----+----+------+  -> X
+//  Block0  B1  Block2
+//  (inlet)         (outlet)
+//
+//  Main tunnel: 60 m long x 4 m wide x 3 m tall
+//  Side chamber: 10 m wide x 12 m deep x 3 m tall
+//  Mesh resolution: ~0.4 m per cell
+//
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+convertToMeters 1;
+
+vertices
+(
+    // ---- main tunnel bottom (z=0) ----
+    (  0  0  0)   //  0
+    ( 28  0  0)   //  1
+    ( 38  0  0)   //  2
+    ( 60  0  0)   //  3
+    (  0  4  0)   //  4
+    ( 28  4  0)   //  5
+    ( 38  4  0)   //  6
+    ( 60  4  0)   //  7
+    // ---- dead-end chamber bottom (z=0) ----
+    ( 28 16  0)   //  8
+    ( 38 16  0)   //  9
+    // ---- main tunnel top (z=3) ----
+    (  0  0  3)   // 10
+    ( 28  0  3)   // 11
+    ( 38  0  3)   // 12
+    ( 60  0  3)   // 13
+    (  0  4  3)   // 14
+    ( 28  4  3)   // 15
+    ( 38  4  3)   // 16
+    ( 60  4  3)   // 17
+    // ---- dead-end chamber top (z=3) ----
+    ( 28 16  3)   // 18
+    ( 38 16  3)   // 19
+);
+
+blocks
+(
+    // Block 0 - main tunnel, inlet section (x=[0,28])
+    // cells: 70(x) x 10(y) x 8(z) ~ 0.4 m per cell
+    hex (0 1 5 4 10 11 15 14)   (70 10 8)  simpleGrading (1 1 1)
+
+    // Block 1 - main tunnel, junction section (x=[28,38])
+    hex (1 2 6 5 11 12 16 15)   (25 10 8)  simpleGrading (1 1 1)
+
+    // Block 2 - main tunnel, outlet section (x=[38,60])
+    hex (2 3 7 6 12 13 17 16)   (55 10 8)  simpleGrading (1 1 1)
+
+    // Block 3 - dead-end side chamber (x=[28,38], y=[4,16])
+    hex (5 6 9 8 15 16 19 18)   (25 30 8)  simpleGrading (1 1 1)
+);
+
+edges ();
+
+boundary
+(
+    inlet
+    {
+        type patch;
+        faces
+        (
+            (0 10 14 4)   // Block 0, x_min face (x=0)
+        );
+    }
+
+    outlet
+    {
+        type patch;
+        faces
+        (
+            (3 7 17 13)   // Block 2, x_max face (x=60)
+        );
+    }
+
+    walls
+    {
+        type wall;
+        faces
+        (
+            // ---- Block 0 walls ----
+            (0 1 11 10)   // B0 y_min (south wall, y=0)
+            (4 14 15 5)   // B0 y_max (north wall x=[0,28], y=4)
+            (0 4 5 1)     // B0 z_min (floor, z=0)
+            (10 11 15 14) // B0 z_max (ceiling, z=3)
+
+            // ---- Block 1 walls ----
+            (1 2 12 11)   // B1 y_min (south wall, y=0)
+            (1 5 6 2)     // B1 z_min (floor, z=0)
+            (11 12 16 15) // B1 z_max (ceiling, z=3)
+            // note: B1 y_max is interior (joins Block 3)
+
+            // ---- Block 2 walls ----
+            (2 3 13 12)   // B2 y_min (south wall, y=0)
+            (6 16 17 7)   // B2 y_max (north wall x=[38,60], y=4)
+            (2 6 7 3)     // B2 z_min (floor, z=0)
+            (12 13 17 16) // B2 z_max (ceiling, z=3)
+
+            // ---- Block 3 walls (dead-end chamber) ----
+            (5 15 18 8)   // B3 x_min (west wall of chamber)
+            (6 9 19 16)   // B3 x_max (east wall of chamber)
+            (8 18 19 9)   // B3 y_max (dead-end wall, y=16)
+            (5 8 9 6)     // B3 z_min (chamber floor, z=0)
+            (15 16 19 18) // B3 z_max (chamber ceiling, z=3)
+        );
+    }
+);
+
+mergePatchPairs ();
+
+// ************************************************************************* //

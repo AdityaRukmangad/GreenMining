@@ -1,0 +1,50 @@
+#!/bin/bash
+#
+# Allrun - run the underground mine syngas dispersion simulation.
+#
+# Usage:
+#   ./Allrun          # Scenario 1 (Normal Ventilation)
+#   ./Allrun 2        # Scenario 2 (Moderate Leak)
+#   ./Allrun 3        # Scenario 3 (Ventilation Failure)
+#   ./Allrun 4        # Scenario 4 (Dead-Zone Accumulation)
+#   ./Allrun 5        # Scenario 5 (Emergency Gas Release)
+#
+# Requirements: OpenFOAM v8
+
+set -e
+cd "$(dirname "$0")"
+SCENARIO=${1:-1}
+
+echo "============================================"
+echo " Mine CFD Simulation - Scenario ${SCENARIO}"
+echo "============================================"
+
+if [ ! -d "scenarios/scenario${SCENARIO}" ]; then
+    echo "ERROR: scenarios/scenario${SCENARIO}/ not found"
+    exit 1
+fi
+
+echo "Loading scenario ${SCENARIO} initial conditions..."
+cp scenarios/scenario${SCENARIO}/U            0/U
+cp scenarios/scenario${SCENARIO}/setFieldsDict system/setFieldsDict
+
+echo "Running blockMesh..."
+blockMesh > log.blockMesh 2>&1 || { cat log.blockMesh; exit 1; }
+
+echo "Running setFields..."
+setFields > log.setFields 2>&1 || { cat log.setFields; exit 1; }
+
+echo "Running buoyantBoussinesqPimpleFoam..."
+if [ -f "system/decomposeParDict" ]; then
+    NPROC=$(grep "numberOfSubdomains" system/decomposeParDict | grep -oP '\d+')
+    decomposePar > log.decomposePar 2>&1
+    mpirun -np "${NPROC}" buoyantBoussinesqPimpleFoam -parallel > log.solver 2>&1
+    reconstructPar > log.reconstructPar 2>&1
+else
+    buoyantBoussinesqPimpleFoam > log.solver 2>&1
+fi
+
+echo "Simulation complete."
+if command -v python3 &>/dev/null; then
+    python3 postProcess_extract.py --scenario "${SCENARIO}"
+fi

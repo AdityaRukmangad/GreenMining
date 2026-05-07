@@ -1,0 +1,109 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+  =========                 |
+  \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox
+   \\    /   O peration     | Version:  v8
+    \\  /    A nd           | Web:      www.OpenFOAM.org
+     \\/     M anipulation  |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    location    "system";
+    object      controlDict;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+application     buoyantBoussinesqPimpleFoam;
+
+startFrom       startTime;
+startTime       0;
+
+stopAt          endTime;
+endTime         300;
+
+deltaT          0.05;
+
+writeControl    adjustableRunTime;
+writeInterval   15;
+
+purgeWrite      0;
+writeFormat     ascii;
+writePrecision  8;
+writeCompression off;
+
+timeFormat      general;
+timePrecision   6;
+
+runTimeModifiable true;
+
+adjustTimeStep  yes;
+maxCo           0.8;
+maxDeltaT       0.5;
+
+functions
+{
+    writeCellCentres
+    {
+        type            writeCellCentres;
+        libs            (fieldFunctionObjects);
+        writeControl    onEnd;
+    }
+
+    scalarTransportCH4
+    {
+        type            scalarTransport;
+        libs            (solverFunctionObjects);
+        field           CH4;
+        D               2.2e-5;
+        nCorr           2;
+        resetOnStartUp  no;
+        writeControl    writeTime;
+    }
+
+    scalarTransportCO
+    {
+        type            scalarTransport;
+        libs            (solverFunctionObjects);
+        field           CO;
+        D               2.0e-5;
+        nCorr           2;
+        resetOnStartUp  no;
+        writeControl    writeTime;
+    }
+
+    scalarTransportH2
+    {
+        type            scalarTransport;
+        libs            (solverFunctionObjects);
+        field           H2;
+        D               7.5e-5;
+        nCorr           2;
+        resetOnStartUp  no;
+        writeControl    writeTime;
+    }
+
+    probes
+    {
+        type            probes;
+        libs            (sampling);
+        writeControl    timeStep;
+        writeInterval   5;
+        fields          (U p_rgh T CH4 CO H2);
+        probeLocations
+        (
+            ( 5  2  1.5)
+            (14  2  1.5)
+            (25  2  1.5)
+            (33  2  1.5)
+            (45  2  1.5)
+            (55  2  1.5)
+            (33  8  1.5)
+            (33 12  1.5)
+            (33 15  1.5)
+        );
+    }
+}
+
+// ************************************************************************* //

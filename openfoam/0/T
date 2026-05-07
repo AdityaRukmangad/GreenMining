@@ -1,0 +1,44 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+  =========                 |
+  \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox
+   \\    /   O peration     | Version:  v8
+    \\  /    A nd           | Web:      www.OpenFOAM.org
+     \\/     M anipulation  |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       volScalarField;
+    location    "0";
+    object      T;
+}
+// Mine ambient temperature 293 K (~20 C). Adiabatic rock walls.
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+dimensions      [0 0 0 1 0 0 0];
+
+internalField   uniform 293;
+
+boundaryField
+{
+    inlet
+    {
+        type            fixedValue;
+        value           uniform 293;
+    }
+
+    outlet
+    {
+        type            inletOutlet;
+        inletValue      uniform 293;
+        value           uniform 293;
+    }
+
+    walls
+    {
+        type            zeroGradient;
+    }
+}
+
+// ************************************************************************* //
