@@ -68,18 +68,36 @@ solvers
         relTol          0.1;
     }
 
-    "(CH4|CO|H2)Final"
-    {
-        $(CH4|CO|H2);
-        relTol          0;
-    }
+    CH4Final
+{
+    solver          PBiCGStab;
+    preconditioner  DILU;
+    tolerance       1e-8;
+    relTol          0;
+}
+
+COFinal
+{
+    solver          PBiCGStab;
+    preconditioner  DILU;
+    tolerance       1e-8;
+    relTol          0;
+}
+
+H2Final
+{
+    solver          PBiCGStab;
+    preconditioner  DILU;
+    tolerance       1e-8;
+    relTol          0;
+}
 }
 
 PIMPLE
 {
     nOuterCorrectors        2;
     nCorrectors             2;
-    nNonOrthogonalCorrectors 1;
+	    nNonOrthogonalCorrectors 1;
     turbOnFinalIterOnly     false;
 
     // Reference pressure for compressible solver: sets absolute level.

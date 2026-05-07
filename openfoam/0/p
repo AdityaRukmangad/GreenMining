@@ -33,8 +33,19 @@ internalField   uniform 101325;         // standard atmospheric pressure
 
 boundaryField
 {
-    // p is always reconstructed from p_rgh; BCs are informational only
-    default
+    inlet
+    {
+        type            calculated;
+        value           uniform 101325;
+    }
+
+    outlet
+    {
+        type            calculated;
+        value           uniform 101325;
+    }
+
+    walls
     {
         type            calculated;
         value           uniform 101325;

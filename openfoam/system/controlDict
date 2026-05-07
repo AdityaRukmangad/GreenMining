@@ -61,8 +61,8 @@ functions
     writeCellCentres
     {
         type            writeCellCentres;
-        libs            (fieldFunctionObjects);
-        writeControl    onEnd;
+        libs            ("libfieldFunctionObjects.so");
+        writeControl    writeTime;
     }
 
     // Passive scalar transport for syngas species.
@@ -70,45 +70,12 @@ functions
     // where Deff = D_molecular + nu_t/Sc_t  (turbulent Schmidt = 0.7)
     // Valid for low-concentration syngas in air (dilute approximation).
 
-    scalarTransportCH4
-    {
-        type            scalarTransport;
-        libs            (solverFunctionObjects);
-        field           CH4;
-        D               2.2e-5;     // [m2/s] molecular diffusivity at 293 K
-        nCorr           2;
-        resetOnStartUp  no;
-        writeControl    writeTime;
-    }
-
-    scalarTransportCO
-    {
-        type            scalarTransport;
-        libs            (solverFunctionObjects);
-        field           CO;
-        D               2.0e-5;
-        nCorr           2;
-        resetOnStartUp  no;
-        writeControl    writeTime;
-    }
-
-    scalarTransportH2
-    {
-        type            scalarTransport;
-        libs            (solverFunctionObjects);
-        field           H2;
-        D               7.5e-5;     // H2 diffuses ~3x faster than CH4
-        nCorr           2;
-        resetOnStartUp  no;
-        writeControl    writeTime;
-    }
-
     // Nine probe points covering inlet, tunnel body, junction, and dead end
     probes
     {
         type            probes;
-        libs            (sampling);
-        writeControl    timeStep;
+        libs            ("libsampling.so");
+        writeControl    writeTime;
         writeInterval   5;
         fields          (U p T CH4 CO H2);
         probeLocations
