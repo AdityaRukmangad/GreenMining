@@ -1,0 +1,61 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+  =========                 |
+  \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox
+   \\    /   O peration     | Version:  v13
+    \\  /    A nd           | Web:      www.OpenFOAM.org
+     \\/     M anipulation  |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       volScalarField;
+    location    "0";
+    object      nut;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+//
+// Turbulent kinematic viscosity [m²/s].
+//
+// Wall BC: nutUSpaldingWallFunction
+//   Computes nut from the local velocity gradient using Spalding's unified
+//   wall law — valid across the full y+ range (viscous sublayer through
+//   log-law region). This avoids the strict y+ 30-300 requirement of
+//   standard wall functions, which cannot be met with the current mesh
+//   (estimated y+ ~ 700-1400 at U=2 m/s).
+//
+//   The Spalding function iteratively solves:
+//     y+ = u+ + exp(-kappa*B) * [ exp(kappa*u+) - 1 - kappa*u+
+//                                  - (kappa*u+)^2/2 - (kappa*u+)^3/6 ]
+//
+//   Internal field initialised to 0 — will be updated by solver
+//   at the first iteration from k and epsilon via nut = Cmu * k^2 / epsilon.
+//
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+dimensions      [0 2 -1 0 0 0 0];
+
+internalField   uniform 0;
+
+boundaryField
+{
+    inlet
+    {
+        type            calculated;
+        value           uniform 0;
+    }
+
+    outlet
+    {
+        type            calculated;
+        value           uniform 0;
+    }
+
+    walls
+    {
+        type            nutUSpaldingWallFunction;
+        value           uniform 0;
+    }
+}
+
+// ************************************************************************* //

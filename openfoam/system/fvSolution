@@ -1,0 +1,130 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+  =========                 |
+  \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox
+   \\    /   O peration     | Version:  v13
+    \\  /    A nd           | Web:      www.OpenFOAM.org
+     \\/     M anipulation  |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    location    "system";
+    object      fvSolution;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+//
+// v13 compressible fluid solver field set:
+//   p_rgh / p_rghFinal   — modified pressure [Pa]
+//   rho   / rhoFinal     — density (explicit EOS update, diagonal solver)
+//   U     / UFinal       — velocity
+//   h     / hFinal       — sensible enthalpy (primary energy variable)
+//   k     / kFinal       — turbulent kinetic energy
+//   epsilon/epsilonFinal — turbulent dissipation (realizableKE)
+//   nut                  — turbulent kinematic viscosity (wall function)
+//   CH4 / CO / H2        — species volume fractions (scalarTransport FOs)
+//
+// Species solver tolerance 1e-9 (tighter than momentum 1e-7):
+//   Residual error in CH4/CO/H2 directly produces false hazard flags.
+//   Scalar equations are cheap — tighter tolerance has negligible runtime cost.
+//
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+solvers
+{
+    // ---- Pressure ----
+    p_rgh
+    {
+        solver          PCG;
+        preconditioner  DIC;
+        tolerance       1e-8;
+        relTol          0.01;
+    }
+
+    p_rghFinal
+    {
+        $p_rgh;
+        relTol          0;
+    }
+
+    // ---- Density (explicit update from equation of state) ----
+    "(rho|rhoFinal)"
+    {
+        solver          diagonal;
+    }
+
+    // ---- Momentum, enthalpy, turbulence ----
+    "(U|h|k|epsilon)"
+    {
+        solver          PBiCGStab;
+        preconditioner  DILU;
+        tolerance       1e-7;
+        relTol          0.1;
+    }
+
+    "(U|h|k|epsilon)Final"
+    {
+        $U;
+        relTol          0;
+    }
+
+    // ---- Turbulent viscosity (nutUSpaldingWallFunction requires own solver) ----
+    nut
+    {
+        solver          PBiCGStab;
+        preconditioner  DILU;
+        tolerance       1e-8;
+        relTol          0;
+    }
+
+    // ---- Passive scalar species ----
+    // relTol 0 on all correctors: no early exit — full convergence required.
+    "(CH4|CO|H2)"
+    {
+        solver          PBiCGStab;
+        preconditioner  DILU;
+        tolerance       1e-9;
+        relTol          0;
+    }
+
+    "(CH4|CO|H2)Final"
+    {
+        $CH4;
+        relTol          0;
+    }
+}
+
+PIMPLE
+{
+    nOuterCorrectors        2;
+    nCorrectors             2;
+	    nNonOrthogonalCorrectors 1;
+    turbOnFinalIterOnly     false;
+
+    // Reference pressure for compressible solver: sets absolute level.
+    // Outlet fixedValue (101325 Pa) also pins pressure, so this is
+    // a belt-and-suspenders reference for closed-domain protection.
+    pRef                    101325;
+}
+
+relaxationFactors
+{
+    fields
+    {
+        p_rgh       0.7;
+        rho         1.0;    // density updated explicitly — no relaxation needed
+    }
+    equations
+    {
+        U           0.7;
+        h           0.7;
+        k           0.7;
+        epsilon     0.7;
+        CH4         0.9;
+        CO          0.9;
+        H2          0.9;
+    }
+}
+
+// ************************************************************************* //

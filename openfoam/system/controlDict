@@ -1,0 +1,260 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+  =========                 |
+  \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox
+   \\    /   O peration     | Version:  v13
+    \\  /    A nd           | Web:      www.OpenFOAM.org
+     \\/     M anipulation  |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    location    "system";
+    object      controlDict;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+//
+// v13: application = foamRun, solver = fluid (compressible buoyant)
+//
+// Species transport:
+//   CH4, CO, H2 solved as passive scalars via scalarTransport functionObjects.
+//   Governing equation per species phi:
+//     d(phi)/dt + div(U, phi) = div(D_eff * grad(phi))
+//     D_eff = D_molecular + nut / Sc_t    (Sc_t = 0.7 for all species)
+//
+//   Molecular diffusivities at 293 K, 101325 Pa:
+//     CH4: D = 2.20e-5 m2/s
+//     CO:  D = 2.05e-5 m2/s
+//     H2:  D = 7.20e-5 m2/s  (H2 diffuses ~3.3x faster than CH4)
+//
+//   Source terms (continuous gas injection) are defined in:
+//     system/scalarSourceTerms
+//   which is copied from scenarios/scenarioN/scalarSourceTerms by Allrun.
+//
+// Geometry: 80 m tunnel, 2 north chambers, 1 south stub — see blockMeshDict.
+//
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+application     foamRun;
+solver          fluid;
+
+startFrom       startTime;
+startTime       0;
+
+stopAt          endTime;
+endTime         300;            // 5 minutes mine-time
+
+deltaT          0.05;           // initial dt; Courant-limited
+
+writeControl    adjustableRunTime;
+writeInterval   15;             // snapshot every 15 s -> 20 time directories
+
+purgeWrite      0;
+writeFormat     ascii;
+writePrecision  8;
+writeCompression off;
+
+timeFormat      general;
+timePrecision   6;
+
+runTimeModifiable true;
+
+adjustTimeStep  yes;
+maxCo           0.5;            // conservative for buoyant compressible
+maxDeltaT       0.5;
+
+// ---- Function objects -------------------------------------------------- //
+
+functions
+{
+    // Write cell centres once at end for Python postprocessor geo-location.
+    writeCellCentres
+    {
+        type            writeCellCentres;
+        libs            ("libfieldFunctionObjects.so");
+        writeControl    writeTime;
+    }
+
+    // ================================================================== //
+    // SPECIES TRANSPORT
+    //
+    // Solves d(phi)/dt + div(U,phi) = div(D_eff*grad(phi)) per species.
+    // D_eff = D_molecular + nut/Sc_t  where Sc_t = 0.7.
+    // nut is provided by the realizableKE turbulence model at each cell.
+    //
+    // bounded01: clamps phi in [0,1] at each corrector step, preventing
+    //   numerical overshoot at concentration fronts from generating
+    //   spurious DANGER flags in the postprocessor.
+    //
+    // nCorr 3: three inner correctors per PIMPLE outer iteration —
+    //   sufficient for CFL <= 0.5 and linearUpwind advection scheme.
+    //
+    // fvOptions: per-scenario continuous source terms.
+    //   The file system/scalarSourceTerms is copied from
+    //   scenarios/scenarioN/scalarSourceTerms by Allrun before the run.
+    //   For scenario 1 it is empty (no sources).
+    // ================================================================== //
+
+    scalarTransportCH4
+    {
+        type            scalarTransport;
+        libs            ("libsolverFunctionObjects.so");
+
+        field           CH4;
+	diffusivity     constant;
+        D               2.2e-5;     // molecular diffusivity [m2/s] at 293 K
+        Sc              0.7;        // turbulent Schmidt number: D_t = nut/Sc
+        nCorr           3;
+        bounded01       true;
+        resetOnStartUp  false;
+
+        fvOptions
+        {
+            #include "scalarSourceTerms"
+        }
+
+        writeControl    writeTime;
+        writeInterval   1;
+    }
+
+    scalarTransportCO
+    {
+        type            scalarTransport;
+        libs            ("libsolverFunctionObjects.so");
+
+        field           CO;
+	diffusivity     constant;
+        D               2.05e-5;
+        Sc              0.7;
+        nCorr           3;
+        bounded01       true;
+        resetOnStartUp  false;
+
+        fvOptions
+        {
+            #include "scalarSourceTerms"
+        }
+
+        writeControl    writeTime;
+        writeInterval   1;
+    }
+
+    scalarTransportH2
+    {
+        type            scalarTransport;
+        libs            ("libsolverFunctionObjects.so");
+
+        field           H2;
+	diffusivity     constant;
+        D               7.2e-5;     // H2: ~3.3x faster molecular diffusion
+        Sc              0.7;
+        nCorr           3;
+        bounded01       true;
+        resetOnStartUp  false;
+
+        fvOptions
+        {
+            #include "scalarSourceTerms"
+        }
+
+        writeControl    writeTime;
+        writeInterval   1;
+    }
+
+    // ================================================================== //
+    // AIRFLOW VALIDATION
+    //
+    // yPlus_check: computes wall y+ distribution at end of run.
+    //   ParaView: load postProcessing/yPlus_check/0/yPlus field on walls.
+    //   Target: y+ > 30 everywhere for log-law wall function validity.
+    //   nutUSpaldingWallFunction is robust across the full y+ range.
+    //
+    // inletFlowRate / outletFlowRate: volumetric flux (phi = U.A) [m3/s].
+    //   Convergence criterion: |Q_in - Q_out| < 0.1% * Q_in.
+    //   Read from postProcessing/inletFlowRate and outletFlowRate/.
+    //
+    // wallShearStress_check: tau_w on all wall patches.
+    //   Use to validate friction against Darcy-Weisbach:
+    //   dP/dx = 4*tau_w / D_h  (for a circular duct, analogous for rect.)
+    //   Expected tau_w ~ 0.04 Pa at U=2 m/s.
+    // ================================================================== //
+
+    yPlus_check
+    {
+        type            yPlus;
+        libs            ("libfieldFunctionObjects.so");
+        writeControl    writeTime;
+	writeInterval   1;
+    }
+
+    wallShearStress_check
+    {
+        type            wallShearStress;
+        libs            ("libfieldFunctionObjects.so");
+        writeControl    writeTime;
+        writeInterval   1;
+    }
+
+    inletFlowRate
+    {
+        type            surfaceFieldValue;
+        libs            ("libfieldFunctionObjects.so");
+        regionType      patch;
+        patches         (inlet);
+        operation       sum;
+        fields          (phi);
+	writeFields     false;
+        writeControl    timeStep;
+        writeInterval   10;
+    }
+
+    outletFlowRate
+    {
+        type            surfaceFieldValue;
+        libs            ("libfieldFunctionObjects.so");
+        regionType      patch;
+        patches         (outlet);
+        operation       sum;
+        fields          (phi);
+	writeFields     false;
+        writeControl    timeStep;
+        writeInterval   10;
+    }
+
+    // ================================================================== //
+    // PROBES — 12 points covering the extended 80 m geometry
+    //
+    //   p1-p2:   inlet section
+    //   p3-p5:   Chamber 1 region (junction + mid + dead end)
+    //   p6:      inter-junction tunnel
+    //   p7-p8:   junction 2 (South Stub tunnel level + stub interior)
+    //   p9-p11:  Chamber 2 region (junction + mid + dead end)
+    //   p12:     outlet section
+    // ================================================================== //
+    probes
+    {
+        type            probes;
+        libs            ("libsampling.so");
+        writeControl    writeTime;
+        writeInterval   5;
+        fields          (U p T CH4 CO H2);
+        probeLocations
+        (
+            (  5   2   1.5)   // p1  inlet region
+            ( 15   2   1.5)   // p2  upstream tunnel (before Chamber 1)
+            ( 25   2   1.5)   // p3  junction 1 — tunnel at Chamber 1 level
+            ( 25  10   1.5)   // p4  Chamber 1 mid-depth
+            ( 25  14   1.5)   // p5  Chamber 1 dead end (highest risk)
+            ( 33   2   1.5)   // p6  inter-junction tunnel
+            ( 39   2   1.5)   // p7  junction 2 — tunnel at South Stub level
+            ( 39  -3   1.5)   // p8  South Stub interior
+            ( 56   2   1.5)   // p9  junction 3 — tunnel at Chamber 2 level
+            ( 56  12   1.5)   // p10 Chamber 2 mid-depth
+            ( 56  18   1.5)   // p11 Chamber 2 dead end (highest risk)
+            ( 72   2   1.5)   // p12 outlet region
+        );
+    }
+}
+
+// ************************************************************************* //

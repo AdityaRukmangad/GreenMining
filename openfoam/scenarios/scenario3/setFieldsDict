@@ -1,0 +1,71 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+  =========                 |
+  \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox
+   \\    /   O peration     | Version:  v13
+    \\  /    A nd           | Web:      www.OpenFOAM.org
+     \\/     M anipulation  |
+\*---------------------------------------------------------------------------*/
+FoamFile { version 2.0; format ascii; class dictionary; object setFieldsDict; }
+// Scenario 3 — Ventilation Failure (0.5 m/s — 75% reduction).
+//
+// Initial conditions represent a state of advanced accumulation after
+// several hours of degraded ventilation — gas has already spread throughout
+// the entire workings before the simulation begins. Three active sources in
+// scalarSourceTerms continue the ongoing emission.
+//
+// Updated geometry: 80 m tunnel, Chamber 1 at x=[20,30] y=[4,16],
+// Chamber 2 at x=[50,62] y=[4,20], South Stub at x=[35,43] y=[-6,0].
+defaultFieldValues
+(
+    volScalarFieldValue CH4  0
+    volScalarFieldValue CO   0
+    volScalarFieldValue H2   0
+);
+regions
+(
+    // Main tunnel — gas present throughout at WARNING/DANGER levels
+    boxToCell
+    {
+        box  (0 0 0) (80 4 3);
+        fieldValues
+        (
+            volScalarFieldValue CH4   0.025   // 2.5% — at DANGER threshold
+            volScalarFieldValue CO    0.0008   // 800 ppm — DANGER
+            volScalarFieldValue H2    0.012    // 1.2% — WARNING
+        );
+    }
+    // Chamber 1 dead end — elevated concentration from stagnant recirculation
+    boxToCell
+    {
+        box  (20 4 0) (30 16 3);
+        fieldValues
+        (
+            volScalarFieldValue CH4   0.035   // 3.5% — DANGER
+            volScalarFieldValue CO    0.0012   // 1200 ppm — DANGER
+            volScalarFieldValue H2    0.018    // 1.8% — WARNING
+        );
+    }
+    // Chamber 2 dead end — similar stagnation accumulation
+    boxToCell
+    {
+        box  (50 4 0) (62 20 3);
+        fieldValues
+        (
+            volScalarFieldValue CH4   0.040   // 4.0% — DANGER
+            volScalarFieldValue CO    0.0015   // 1500 ppm — DANGER
+            volScalarFieldValue H2    0.022    // 2.2% — DANGER
+        );
+    }
+    // South Stub — fully filled (no through-flow, pure stagnation zone)
+    boxToCell
+    {
+        box  (35 -6 0) (43 0 3);
+        fieldValues
+        (
+            volScalarFieldValue CH4   0.025
+            volScalarFieldValue CO    0.0008
+            volScalarFieldValue H2    0.012
+        );
+    }
+);
+// ************************************************************************* //

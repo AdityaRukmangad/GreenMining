@@ -1,0 +1,55 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+  =========                 |
+  \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox
+   \\    /   O peration     | Version:  v13
+    \\  /    A nd           | Web:      www.OpenFOAM.org
+     \\/     M anipulation  |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       volScalarField;
+    location    "0";
+    object      p_rgh;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+//
+// Modified pressure: p_rgh = p - rho*g*h  [Pa]
+//
+// v13 migration note:
+//   Old incompressible (v8): dimensions [0 2 -2 0 0 0 0], value 0 (kinematic)
+//   New compressible  (v13): dimensions [1 -1 -2 0 0 0 0], value 101325 (Pa)
+//
+// Boundary conditions:
+//   inlet  — zeroGradient: pressure floats; velocity drives the flow
+//   outlet — fixedValue 101325 Pa: absolute pressure reference
+//   walls  — fixedFluxPressure: zero normal flux, corrects for rho*g*h
+//
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+dimensions      [1 -1 -2 0 0 0 0];     // Pa  (NOT kinematic m²/s²)
+
+internalField   uniform 101325;
+
+boundaryField
+{
+    inlet
+    {
+        type            zeroGradient;
+    }
+
+    outlet
+    {
+        type            fixedValue;
+        value           uniform 101325;
+    }
+
+    walls
+    {
+        type            fixedFluxPressure;
+        value           uniform 101325;
+    }
+}
+
+// ************************************************************************* //

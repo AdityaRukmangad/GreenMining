@@ -1,0 +1,43 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+  =========                 |
+  \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox
+   \\    /   O peration     | Version:  v13
+    \\  /    A nd           | Web:      www.OpenFOAM.org
+     \\/     M anipulation  |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    location    "constant";
+    object      momentumTransport;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+//
+// Realizable k-epsilon RAS (Shih et al. 1994)
+//
+// Improvement over standard k-epsilon:
+//   - Variable Cmu (strain-rate dependent) prevents negative normal stresses
+//     under strong shear — critical at the tunnel/chamber junction where the
+//     flow separates and forms a recirculation zone.
+//   - Improved epsilon equation reduces over-production at stagnation points
+//     (e.g. the dead-end back wall of each chamber).
+//   - Same computational cost as standard k-epsilon; better for separated
+//     and recirculating flows dominant in this mine geometry.
+//
+// Re = U * D_h / nu = 2.0 * 3.43 / 1.5e-5 ≈ 457,000 (fully turbulent).
+// Wall treatment: nutUSpaldingWallFunction (see 0/nut).
+//
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+simulationType  RAS;
+
+RAS
+{
+    model           realizableKE;
+    turbulence      on;
+    printCoeffs     on;
+}
+
+// ************************************************************************* //

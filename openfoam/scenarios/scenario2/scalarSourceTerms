@@ -1,0 +1,37 @@
+// Scenario 2 — Moderate Syngas Leak (1.5 m/s ventilation)
+//
+// Source: Minor coal seam seepage near the Chamber 1 junction (x≈18 m).
+// Models CH4 emerging from strata cracks at the approach to the first
+// dead-end. Represents a developing leak before alarm threshold is crossed.
+//
+// Physical basis:
+//   Target Q_CH4 = 0.5 L/min = 8.33e-6 m3/s
+//   Single injection point → cell volume ≈ 0.06 m3
+//   Su = Q / V_cell = 8.33e-6 / 0.06 ≈ 1.4e-4  [vol_frac / s]
+//
+//   CO and H2 scaled to approximate syngas composition from goaf seepage:
+//     CO:  ~25% of CH4 rate (CO from oxidation in goaf)
+//     H2:  ~38% of CH4 rate (H2 from coal oxidation + moisture)
+//
+// Expected behaviour:
+//   Gas accumulates in the dead end of Chamber 1 over 300 s.
+//   Ventilation partially flushes the plume — WARNING zones expected
+//   at Chamber 1 dead end (p5), mild WARNING at tunnel junction (p3).
+
+seam_source_S2
+{
+    type            scalarSemiImplicitSource;
+    active          yes;
+    selectionMode   points;
+    points          ((18 2 1.5));   // seam seepage point, tunnel at x=18 m
+
+    volumeMode      specific;       // source per unit volume of selected cells
+
+    injectionRateSuSp
+    {
+        // Su [vol_frac/s]:  explicit source term (no implicit part Sp=0)
+        CH4     (1.4e-4  0);        // 0.5 L/min equivalent
+        CO      (3.5e-5  0);        // 0.125 L/min
+        H2      (5.3e-5  0);        // 0.19 L/min
+    }
+}

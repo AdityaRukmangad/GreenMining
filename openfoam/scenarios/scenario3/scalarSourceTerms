@@ -1,0 +1,65 @@
+// Scenario 3 — Ventilation Failure (0.5 m/s — 75% reduction)
+//
+// Sources: Multiple seam seepage points active simultaneously.
+// Represents a period where ventilation has failed but gas emission continues
+// from three independent strata sources throughout the workings.
+// With only 0.5 m/s airflow, residence time in each chamber is >> 5 min —
+// gas accumulates beyond DANGER threshold across the entire domain.
+//
+// Physical basis per source:
+//   Target Q_CH4 = 2 L/min = 3.33e-5 m3/s per point
+//   Su ≈ 3.33e-5 / 0.06 ≈ 5.5e-4  [vol_frac / s]
+//
+// Three sources: Chamber 1 dead end, Chamber 2 dead end, South Stub interior.
+// CO fraction elevated (mine fire / goaf oxidation conditions).
+
+seam_source_S3_chamber1
+{
+    type            scalarSemiImplicitSource;
+    active          yes;
+    selectionMode   points;
+    points          ((25 13 1.5));  // Chamber 1 dead end region
+
+    volumeMode      specific;
+
+    injectionRateSuSp
+    {
+        CH4     (5.5e-4  0);        // 2.0 L/min
+        CO      (1.4e-4  0);        // 0.5 L/min (elevated — goaf oxidation)
+        H2      (2.1e-4  0);        // 0.76 L/min
+    }
+}
+
+seam_source_S3_chamber2
+{
+    type            scalarSemiImplicitSource;
+    active          yes;
+    selectionMode   points;
+    points          ((56 17 1.5));  // Chamber 2 dead end region
+
+    volumeMode      specific;
+
+    injectionRateSuSp
+    {
+        CH4     (5.5e-4  0);
+        CO      (1.4e-4  0);
+        H2      (2.1e-4  0);
+    }
+}
+
+seam_source_S3_stub
+{
+    type            scalarSemiImplicitSource;
+    active          yes;
+    selectionMode   points;
+    points          ((39 -4 1.5));  // South Stub interior
+
+    volumeMode      specific;
+
+    injectionRateSuSp
+    {
+        CH4     (5.5e-4  0);
+        CO      (1.4e-4  0);
+        H2      (2.1e-4  0);
+    }
+}

@@ -1,0 +1,46 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+  =========                 |
+  \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox
+   \\    /   O peration     | Version:  v8
+    \\  /    A nd           | Web:      www.OpenFOAM.org
+     \\/     M anipulation  |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       volScalarField;
+    location    "0";
+    object      epsilon;
+}
+// Turbulent dissipation rate
+// D_h=3.43m, L=0.07*D_h=0.24m, eps=Cmu^0.75*k^1.5/L=0.00126 m2/s3
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+dimensions      [0 2 -3 0 0 0 0];
+
+internalField   uniform 0.00126;
+
+boundaryField
+{
+    inlet
+    {
+        type            fixedValue;
+        value           uniform 0.00126;
+    }
+
+    outlet
+    {
+        type            inletOutlet;
+        inletValue      uniform 0.00126;
+        value           uniform 0.00126;
+    }
+
+    walls
+    {
+        type            epsilonWallFunction;
+        value           uniform 0.00126;
+    }
+}
+
+// ************************************************************************* //

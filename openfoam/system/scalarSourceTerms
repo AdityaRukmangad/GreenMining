@@ -1,0 +1,3 @@
+// Scenario 1 — Normal Ventilation (2.0 m/s)
+// No gas sources. All species initialized to zero by setFields.
+// Ventilation is fully adequate — no accumulation expected.

@@ -1,0 +1,51 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+  =========                 |
+  \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox
+   \\    /   O peration     | Version:  v13
+    \\  /    A nd           | Web:      www.OpenFOAM.org
+     \\/     M anipulation  |
+\*---------------------------------------------------------------------------*/
+FoamFile { version 2.0; format ascii; class dictionary; object setFieldsDict; }
+// Scenario 4 — Dead-Zone Accumulation (1.0 m/s ventilation).
+//
+// Localised accumulation in Chamber 1 dead end — the primary dead zone in
+// this geometry. Gas has pooled in the upper section of the chamber where
+// recirculation velocity is near zero. Spillover into the tunnel at the
+// junction creates a WARNING region that extends toward the inter-junction
+// section. Chamber 2 and South Stub are clear.
+//
+// One active source in scalarSourceTerms sustains DANGER at Chamber 1 dead end.
+//
+// Updated for 80 m geometry: Chamber 1 at x=[20,30], y=[4,16].
+defaultFieldValues
+(
+    volScalarFieldValue CH4  0
+    volScalarFieldValue CO   0
+    volScalarFieldValue H2   0
+);
+regions
+(
+    // Chamber 1 — DANGER at dead end
+    boxToCell
+    {
+        box  (20 4 0) (30 16 3);
+        fieldValues
+        (
+            volScalarFieldValue CH4   0.040   // 4.0% — DANGER (above 2.5% threshold)
+            volScalarFieldValue CO    0.0020   // 2000 ppm — DANGER
+            volScalarFieldValue H2    0.025    // 2.5% — DANGER
+        );
+    }
+    // Tunnel spillover at junction 1 — WARNING spreading into main tunnel
+    boxToCell
+    {
+        box  (18 0 0) (32 4 3);
+        fieldValues
+        (
+            volScalarFieldValue CH4   0.012   // 1.2% — WARNING
+            volScalarFieldValue CO    0.0004   // 400 ppm — WARNING
+            volScalarFieldValue H2    0.006    // 0.6% — WARNING
+        );
+    }
+);
+// ************************************************************************* //
