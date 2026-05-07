@@ -1,50 +1,91 @@
 #!/bin/bash
 #
-# Allrun - run the underground mine syngas dispersion simulation.
+# Allrun — run the underground mine syngas dispersion simulation.
+#
+# Target: OpenFOAM Foundation v13 (foamRun + fluid solver)
 #
 # Usage:
-#   ./Allrun          # Scenario 1 (Normal Ventilation)
-#   ./Allrun 2        # Scenario 2 (Moderate Leak)
-#   ./Allrun 3        # Scenario 3 (Ventilation Failure)
-#   ./Allrun 4        # Scenario 4 (Dead-Zone Accumulation)
-#   ./Allrun 5        # Scenario 5 (Emergency Gas Release)
+#   ./Allrun          # Scenario 1 — Normal Ventilation     (2.0 m/s)
+#   ./Allrun 2        # Scenario 2 — Moderate Syngas Leak   (1.5 m/s)
+#   ./Allrun 3        # Scenario 3 — Ventilation Failure    (0.5 m/s)
+#   ./Allrun 4        # Scenario 4 — Dead-Zone Accumulation (1.0 m/s)
+#   ./Allrun 5        # Scenario 5 — Emergency Gas Release  (2.0 m/s)
 #
-# Requirements: OpenFOAM v8
+# Requirements:
+#   OpenFOAM Foundation v13  — source before running:
+#     source /opt/openfoam13/etc/bashrc
+#   Python 3 + numpy + pandas — for postProcess_extract.py
+#
+# v13 solver change:
+#   OLD: buoyantBoussinesqPimpleFoam   (incompressible Boussinesq, v8)
+#   NEW: foamRun -solver fluid         (compressible buoyant, v13)
+#
+# Thermodynamic model:
+#   heRhoThermo / perfectGas / hConst
+#   rho = p / (R_specific * T),  R = 286.9 J/(kg.K)
+#   At 293 K, 101325 Pa: rho = 1.205 kg/m3, nu = 1.50e-5 m2/s
 
 set -e
 cd "$(dirname "$0")"
+
 SCENARIO=${1:-1}
 
-echo "============================================"
-echo " Mine CFD Simulation - Scenario ${SCENARIO}"
-echo "============================================"
+echo "========================================================"
+echo " GreenMining Underground Mine CFD  —  OpenFOAM v13"
+echo " Scenario ${SCENARIO}"
+echo "========================================================"
 
+# ---- 1. Validate scenario -----------------------------------------------
 if [ ! -d "scenarios/scenario${SCENARIO}" ]; then
     echo "ERROR: scenarios/scenario${SCENARIO}/ not found"
     exit 1
 fi
 
-echo "Loading scenario ${SCENARIO} initial conditions..."
-cp scenarios/scenario${SCENARIO}/U            0/U
+# ---- 2. Load scenario-specific initial conditions -----------------------
+echo "[1/5] Loading scenario ${SCENARIO} initial conditions..."
+cp scenarios/scenario${SCENARIO}/U             0/U
 cp scenarios/scenario${SCENARIO}/setFieldsDict system/setFieldsDict
 
-echo "Running blockMesh..."
-blockMesh > log.blockMesh 2>&1 || { cat log.blockMesh; exit 1; }
+# ---- 3. Generate mesh ---------------------------------------------------
+echo "[2/5] Running blockMesh..."
+blockMesh > log.blockMesh 2>&1 || { echo "blockMesh FAILED:"; tail -10 log.blockMesh; exit 1; }
 
-echo "Running setFields..."
-setFields > log.setFields 2>&1 || { cat log.setFields; exit 1; }
+# ---- 4. Set initial gas-concentration fields ----------------------------
+echo "[3/5] Running setFields..."
+setFields > log.setFields 2>&1 || { echo "setFields FAILED:"; tail -10 log.setFields; exit 1; }
 
-echo "Running buoyantBoussinesqPimpleFoam..."
+# ---- 5. Run CFD solver (OpenFOAM v13) -----------------------------------
+echo "[4/5] Running foamRun (fluid solver, compressible buoyant)..."
+
 if [ -f "system/decomposeParDict" ]; then
-    NPROC=$(grep "numberOfSubdomains" system/decomposeParDict | grep -oP '\d+')
-    decomposePar > log.decomposePar 2>&1
-    mpirun -np "${NPROC}" buoyantBoussinesqPimpleFoam -parallel > log.solver 2>&1
+    NPROC=$(grep "numberOfSubdomains" system/decomposeParDict | grep -oP '\d+' | head -1)
+    echo "      Parallel run on ${NPROC} processors"
+    decomposePar -force > log.decomposePar 2>&1
+    mpirun -np "${NPROC}" foamRun -solver fluid -parallel > log.solver 2>&1
     reconstructPar > log.reconstructPar 2>&1
 else
-    buoyantBoussinesqPimpleFoam > log.solver 2>&1
+    foamRun -solver fluid > log.solver 2>&1 || {
+        echo "foamRun FAILED. Last 20 lines:"
+        tail -20 log.solver
+        exit 1
+    }
 fi
 
-echo "Simulation complete."
+echo "      $(grep '^ExecutionTime' log.solver | tail -1)"
+
+# ---- 6. Post-process to CSV for ML pipeline ----------------------------
+echo "[5/5] Exporting CSV dataset..."
 if command -v python3 &>/dev/null; then
-    python3 postProcess_extract.py --scenario "${SCENARIO}"
+    python3 postProcess_extract.py --scenario "${SCENARIO}" \
+        && echo "      CSV: mine_cfd_output_scenario${SCENARIO}.csv" \
+        || echo "      WARNING: postProcess_extract.py failed (check numpy/pandas)"
+else
+    echo "      python3 not found — skipping CSV export"
 fi
+
+echo ""
+echo "Done."
+echo "  Time dirs : 0/ to 300/ (15 s intervals)"
+echo "  Probes    : postProcessing/probes/"
+echo "  CSV data  : mine_cfd_output_scenario${SCENARIO}.csv"
+echo "  ParaView  : paraFoam -builtin"

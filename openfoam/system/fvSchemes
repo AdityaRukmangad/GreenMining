@@ -1,7 +1,7 @@
 /*--------------------------------*- C++ -*----------------------------------*\
   =========                 |
   \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox
-   \\    /   O peration     | Version:  v8
+   \\    /   O peration     | Version:  v13
     \\  /    A nd           | Web:      www.OpenFOAM.org
      \\/     M anipulation  |
 \*---------------------------------------------------------------------------*/
@@ -14,6 +14,15 @@ FoamFile
     object      fvSchemes;
 }
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+//
+// v13 migration additions (compressible fluid solver):
+//   div(phi,h)    — enthalpy advection (fluid solver solves h, not T directly)
+//   div(phi,K)    — kinetic energy transport
+//   div(phid,p)   — density-weighted pressure flux (compressibility correction)
+//
+// Schemes are second-order, bounded and stable for transient buoyant flows.
+//
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 
 ddtSchemes
 {
@@ -25,19 +34,36 @@ gradSchemes
     default         Gauss linear;
     grad(p_rgh)     Gauss linear;
     grad(U)         Gauss linear;
+    grad(h)         Gauss linear;
 }
 
 divSchemes
 {
     default         none;
-    div(phi,U)          Gauss linearUpwind grad(U);
-    div(phi,T)          Gauss linearUpwind grad(T);
-    div(phi,k)          Gauss linearUpwind grad(k);
-    div(phi,epsilon)    Gauss linearUpwind grad(epsilon);
+
+    // Momentum
+    div(phi,U)              Gauss linearUpwind grad(U);
+
+    // Energy — enthalpy (compressible fluid solver uses h as primary variable)
+    div(phi,h)              Gauss linearUpwind grad(h);
+
+    // Kinetic energy correction term in compressible energy equation
+    div(phi,K)              Gauss linear;
+
+    // Pressure-density coupling (compressibility): phi_density = rho * phi_vol
+    div(phid,p)             Gauss limitedLinear 1;
+
+    // Turbulence
+    div(phi,k)              Gauss linearUpwind grad(k);
+    div(phi,epsilon)        Gauss linearUpwind grad(epsilon);
+
+    // Viscous stress (symmetric deviatoric part)
     div((nuEff*dev(T(grad(U)))))    Gauss linear;
-    div(phi,CH4)        Gauss linearUpwind grad(CH4);
-    div(phi,CO)         Gauss linearUpwind grad(CO);
-    div(phi,H2)         Gauss linearUpwind grad(H2);
+
+    // Species — passive scalars (scalarTransport function objects)
+    div(phi,CH4)            Gauss linearUpwind grad(CH4);
+    div(phi,CO)             Gauss linearUpwind grad(CO);
+    div(phi,H2)             Gauss linearUpwind grad(H2);
 }
 
 laplacianSchemes
@@ -58,7 +84,8 @@ snGradSchemes
 fluxRequired
 {
     default         no;
-    p_rgh           ;
+    p_rgh           ;   // pressure correction requires flux
+    pcorr           ;   // non-orthogonality correction loop
 }
 
 // ************************************************************************* //

@@ -11,43 +11,32 @@ FoamFile
     format      ascii;
     class       volScalarField;
     location    "0";
-    object      p_rgh;
+    object      p;
 }
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 //
-// Modified pressure: p_rgh = p - rho*g*h  [Pa]
+// Thermodynamic (absolute) pressure [Pa].
 //
-// v13 migration note:
-//   Old incompressible (v8): dimensions [0 2 -2 0 0 0 0], value 0 (kinematic)
-//   New compressible  (v13): dimensions [1 -1 -2 0 0 0 0], value 101325 (Pa)
+// In the compressible fluid solver:
+//   p_rgh = p - rho*g*h   (working variable solved by PIMPLE)
+//   p     = p_rgh + rho*g*h  (reconstructed each iteration)
 //
-// Boundary conditions:
-//   inlet  — zeroGradient: pressure floats; velocity drives the flow
-//   outlet — fixedValue 101325 Pa: absolute pressure reference
-//   walls  — fixedFluxPressure: zero normal flux, corrects for rho*g*h
+// p is therefore a DERIVED field — boundaries are "calculated".
+// The solver initialises rho from p and T:
+//   rho = p / (R_specific * T) = 101325 / (286.9 * 293) = 1.205 kg/m³
 //
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 
-dimensions      [1 -1 -2 0 0 0 0];     // Pa  (NOT kinematic m²/s²)
+dimensions      [1 -1 -2 0 0 0 0];     // kg/(m·s²) = Pa
 
-internalField   uniform 101325;
+internalField   uniform 101325;         // standard atmospheric pressure
 
 boundaryField
 {
-    inlet
+    // p is always reconstructed from p_rgh; BCs are informational only
+    default
     {
-        type            zeroGradient;
-    }
-
-    outlet
-    {
-        type            fixedValue;
-        value           uniform 101325;
-    }
-
-    walls
-    {
-        type            fixedFluxPressure;
+        type            calculated;
         value           uniform 101325;
     }
 }

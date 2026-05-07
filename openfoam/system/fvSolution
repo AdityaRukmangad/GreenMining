@@ -1,7 +1,7 @@
 /*--------------------------------*- C++ -*----------------------------------*\
   =========                 |
   \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox
-   \\    /   O peration     | Version:  v8
+   \\    /   O peration     | Version:  v13
     \\  /    A nd           | Web:      www.OpenFOAM.org
      \\/     M anipulation  |
 \*---------------------------------------------------------------------------*/
@@ -14,9 +14,16 @@ FoamFile
     object      fvSolution;
 }
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+//
+// v13 migration additions (compressible fluid solver):
+//   rho / rhoFinal  — density update (explicit diagonal solver)
+//   h   / hFinal    — enthalpy equation (replaces T as primary energy var)
+//
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 
 solvers
 {
+    // ---- Pressure ----
     p_rgh
     {
         solver          PCG;
@@ -31,7 +38,14 @@ solvers
         relTol          0;
     }
 
-    "(U|T|k|epsilon)"
+    // ---- Density (explicit update from equation of state) ----
+    "(rho|rhoFinal)"
+    {
+        solver          diagonal;
+    }
+
+    // ---- Momentum, enthalpy, turbulence ----
+    "(U|h|k|epsilon)"
     {
         solver          PBiCGStab;
         preconditioner  DILU;
@@ -39,12 +53,13 @@ solvers
         relTol          0.1;
     }
 
-    "(U|T|k|epsilon)Final"
+    "(U|h|k|epsilon)Final"
     {
         $U;
         relTol          0;
     }
 
+    // ---- Passive scalar species ----
     "(CH4|CO|H2)"
     {
         solver          PBiCGStab;
@@ -65,21 +80,25 @@ PIMPLE
     nOuterCorrectors        2;
     nCorrectors             2;
     nNonOrthogonalCorrectors 1;
-    pRefCell                0;
-    pRefValue               0;
     turbOnFinalIterOnly     false;
+
+    // Reference pressure for compressible solver: sets absolute level.
+    // Outlet fixedValue (101325 Pa) also pins pressure, so this is
+    // a belt-and-suspenders reference for closed-domain protection.
+    pRef                    101325;
 }
 
 relaxationFactors
 {
     fields
     {
-        p_rgh   0.7;
+        p_rgh       0.7;
+        rho         1.0;    // density updated explicitly — no relaxation needed
     }
     equations
     {
         U           0.7;
-        T           0.7;
+        h           0.7;
         k           0.7;
         epsilon     0.7;
         CH4         0.9;

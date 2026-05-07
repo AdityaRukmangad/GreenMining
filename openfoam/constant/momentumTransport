@@ -1,0 +1,33 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+  =========                 |
+  \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox
+   \\    /   O peration     | Version:  v13
+    \\  /    A nd           | Web:      www.OpenFOAM.org
+     \\/     M anipulation  |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    location    "constant";
+    object      momentumTransport;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+//
+// OpenFOAM v13 renamed turbulenceProperties → momentumTransport.
+// Standard k-epsilon RAS model — well validated for mine ventilation flows
+// at Re = U * D_h / nu = 2.0 * 3.43 / 1.5e-5 ≈ 457,000 (fully turbulent).
+//
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+simulationType  RAS;
+
+RAS
+{
+    model           kEpsilon;
+    turbulence      on;
+    printCoeffs     on;
+}
+
+// ************************************************************************* //
