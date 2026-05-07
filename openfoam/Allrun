@@ -16,14 +16,23 @@
 #     source /opt/openfoam13/etc/bashrc
 #   Python 3 + numpy + pandas — for postProcess_extract.py
 #
-# v13 solver change:
-#   OLD: buoyantBoussinesqPimpleFoam   (incompressible Boussinesq, v8)
-#   NEW: foamRun -solver fluid         (compressible buoyant, v13)
-#
-# Thermodynamic model:
-#   heRhoThermo / perfectGas / hConst
+# Solver: foamRun -solver fluid  (compressible buoyant, v13)
+#   heRhoThermo / perfectGas / hConst / realizableKE
 #   rho = p / (R_specific * T),  R = 286.9 J/(kg.K)
 #   At 293 K, 101325 Pa: rho = 1.205 kg/m3, nu = 1.50e-5 m2/s
+#
+# Species transport:
+#   CH4/CO/H2 solved via scalarTransport functionObjects (solverFunctionObjects).
+#   Source terms (continuous gas injection) are scenario-specific and read
+#   from system/scalarSourceTerms (copied from scenarios/scenarioN/ below).
+#
+# Extended geometry: 80 m tunnel, Chamber 1 (x=[20,30] N), Chamber 2
+#   (x=[50,62] N), South Stub (x=[35,43] S).  ~31,600 cells.
+#
+# Airflow validation (after any run):
+#   postProcess -func yPlus_check    — check near-wall y+ distribution
+#   postProcessing/inletFlowRate/    — volumetric flux for mass conservation
+#   postProcessing/wallShearStress_check/ — friction validation
 
 set -e
 cd "$(dirname "$0")"
@@ -42,20 +51,26 @@ if [ ! -d "scenarios/scenario${SCENARIO}" ]; then
 fi
 
 # ---- 2. Load scenario-specific initial conditions -----------------------
-echo "[1/5] Loading scenario ${SCENARIO} initial conditions..."
+echo "[1/6] Loading scenario ${SCENARIO} initial conditions..."
 cp scenarios/scenario${SCENARIO}/U             0/U
 cp scenarios/scenario${SCENARIO}/setFieldsDict system/setFieldsDict
 
+# Copy scenario-specific scalar source terms.
+# These are read by the scalarTransport function objects in controlDict via:
+#   fvOptions { #include "scalarSourceTerms" }
+# For scenario 1 the file is empty (no active gas sources).
+cp scenarios/scenario${SCENARIO}/scalarSourceTerms system/scalarSourceTerms
+
 # ---- 3. Generate mesh ---------------------------------------------------
-echo "[2/5] Running blockMesh..."
+echo "[2/6] Running blockMesh..."
 blockMesh > log.blockMesh 2>&1 || { echo "blockMesh FAILED:"; tail -10 log.blockMesh; exit 1; }
 
 # ---- 4. Set initial gas-concentration fields ----------------------------
-echo "[3/5] Running setFields..."
+echo "[3/6] Running setFields..."
 setFields > log.setFields 2>&1 || { echo "setFields FAILED:"; tail -10 log.setFields; exit 1; }
 
 # ---- 5. Run CFD solver (OpenFOAM v13) -----------------------------------
-echo "[4/5] Running foamRun (fluid solver, compressible buoyant)..."
+echo "[4/6] Running foamRun (fluid solver, compressible buoyant + species transport)..."
 
 if [ -f "system/decomposeParDict" ]; then
     NPROC=$(grep "numberOfSubdomains" system/decomposeParDict | grep -oP '\d+' | head -1)
@@ -73,8 +88,23 @@ fi
 
 echo "      $(grep '^ExecutionTime' log.solver | tail -1)"
 
-# ---- 6. Post-process to CSV for ML pipeline ----------------------------
-echo "[5/5] Exporting CSV dataset..."
+# ---- 6. Airflow validation (quick checks) --------------------------------
+echo "[5/6] Running airflow validation checks..."
+if command -v postProcess &>/dev/null; then
+    postProcess -func yPlus_check > log.yPlus 2>&1 \
+        && echo "      y+ field written to postProcessing/yPlus_check/" \
+        || echo "      WARNING: yPlus postProcess failed (check log.yPlus)"
+    # Report inlet/outlet flow rate balance from last written time
+    if [ -d "postProcessing/inletFlowRate" ]; then
+        echo "      Flow rate logs: postProcessing/inletFlowRate/"
+        echo "                      postProcessing/outletFlowRate/"
+    fi
+else
+    echo "      postProcess not found — skipping validation"
+fi
+
+# ---- 7. Post-process to CSV for ML pipeline ----------------------------
+echo "[6/6] Exporting CSV dataset..."
 if command -v python3 &>/dev/null; then
     python3 postProcess_extract.py --scenario "${SCENARIO}" \
         && echo "      CSV: mine_cfd_output_scenario${SCENARIO}.csv" \
@@ -85,7 +115,12 @@ fi
 
 echo ""
 echo "Done."
-echo "  Time dirs : 0/ to 300/ (15 s intervals)"
-echo "  Probes    : postProcessing/probes/"
-echo "  CSV data  : mine_cfd_output_scenario${SCENARIO}.csv"
-echo "  ParaView  : paraFoam -builtin"
+echo "  Time dirs  : 0/ to 300/ (15 s intervals, 20 snapshots)"
+echo "  Probes     : postProcessing/probes/  (12 points, fields: U p T CH4 CO H2)"
+echo "  CSV data   : mine_cfd_output_scenario${SCENARIO}.csv"
+echo "  y+ check   : postProcessing/yPlus_check/"
+echo "  Flow rates : postProcessing/inletFlowRate/ and outletFlowRate/"
+echo "  ParaView   : paraFoam -builtin"
+echo ""
+echo "  Species transport: CH4/CO/H2 actively transported by airflow."
+echo "  Source terms     : scenarios/scenario${SCENARIO}/scalarSourceTerms"

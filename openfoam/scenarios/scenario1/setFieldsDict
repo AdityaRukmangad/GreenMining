@@ -1,12 +1,12 @@
 /*--------------------------------*- C++ -*----------------------------------*\
   =========                 |
   \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox
-   \\    /   O peration     | Version:  v8
+   \\    /   O peration     | Version:  v13
     \\  /    A nd           | Web:      www.OpenFOAM.org
      \\/     M anipulation  |
 \*---------------------------------------------------------------------------*/
 FoamFile { version 2.0; format ascii; class dictionary; object setFieldsDict; }
-// Scenario 1 - Normal Ventilation. No gas. Expected: all SAFE.
+// Scenario 1 — Normal Ventilation (2.0 m/s). No gas at t=0. Expected: all SAFE.
 defaultFieldValues
 (
     volScalarFieldValue CH4  0

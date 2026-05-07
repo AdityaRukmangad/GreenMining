@@ -1,0 +1,35 @@
+// Scenario 4 — Dead-Zone Accumulation (1.0 m/s ventilation)
+//
+// Source: Concentrated seam emission from Chamber 1 dead end.
+// Represents a localised emission point deep in the dead-end, where the
+// recirculation zone traps gas effectively even with moderate ventilation.
+// Chamber 2 and the South Stub are clear — asymmetric hazard topology.
+//
+// Physical basis:
+//   Target Q_CH4 = 1.5 L/min = 2.5e-5 m3/s
+//   Su ≈ 2.5e-5 / 0.06 ≈ 4.2e-4  [vol_frac / s]
+//
+//   CO elevated: assumes partial oxidation from old goaf material at
+//   the dead end of Chamber 1 (common in long-abandoned headings).
+//
+// Expected behaviour:
+//   Sustained DANGER at Chamber 1 dead end (p5).
+//   WARNING at Chamber 1 mid-point (p4) and junction tunnel (p3).
+//   Probes p6-p12 remain SAFE — ventilation prevents downstream migration.
+
+seam_source_S4_dead_end
+{
+    type            scalarSemiImplicitSource;
+    active          yes;
+    selectionMode   points;
+    points          ((25 14 1.5));  // Chamber 1 dead end — 10 m into chamber
+
+    volumeMode      specific;
+
+    injectionRateSuSp
+    {
+        CH4     (4.2e-4  0);        // 1.5 L/min
+        CO      (1.6e-4  0);        // 0.57 L/min (elevated CO from old goaf)
+        H2      (1.6e-4  0);        // 0.57 L/min
+    }
+}

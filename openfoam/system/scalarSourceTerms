@@ -1,0 +1,4 @@
+// scalarSourceTerms — default (Scenario 1: Normal Ventilation)
+// No active gas sources. Pure ventilation flush of any initial gas.
+// This file is overwritten by Allrun: scenarios/scenarioN/scalarSourceTerms
+// is copied here before the solver runs.

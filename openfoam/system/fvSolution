@@ -15,9 +15,19 @@ FoamFile
 }
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 //
-// v13 migration additions (compressible fluid solver):
-//   rho / rhoFinal  — density update (explicit diagonal solver)
-//   h   / hFinal    — enthalpy equation (replaces T as primary energy var)
+// v13 compressible fluid solver field set:
+//   p_rgh / p_rghFinal   — modified pressure [Pa]
+//   rho   / rhoFinal     — density (explicit EOS update, diagonal solver)
+//   U     / UFinal       — velocity
+//   h     / hFinal       — sensible enthalpy (primary energy variable)
+//   k     / kFinal       — turbulent kinetic energy
+//   epsilon/epsilonFinal — turbulent dissipation (realizableKE)
+//   nut                  — turbulent kinematic viscosity (wall function)
+//   CH4 / CO / H2        — species volume fractions (scalarTransport FOs)
+//
+// Species solver tolerance 1e-9 (tighter than momentum 1e-7):
+//   Residual error in CH4/CO/H2 directly produces false hazard flags.
+//   Scalar equations are cheap — tighter tolerance has negligible runtime cost.
 //
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 
@@ -59,18 +69,28 @@ solvers
         relTol          0;
     }
 
-    // ---- Passive scalar species ----
-    "(CH4|CO|H2)"
+    // ---- Turbulent viscosity (nutUSpaldingWallFunction requires own solver) ----
+    nut
     {
         solver          PBiCGStab;
         preconditioner  DILU;
         tolerance       1e-8;
-        relTol          0.1;
+        relTol          0;
+    }
+
+    // ---- Passive scalar species ----
+    // relTol 0 on all correctors: no early exit — full convergence required.
+    "(CH4|CO|H2)"
+    {
+        solver          PBiCGStab;
+        preconditioner  DILU;
+        tolerance       1e-9;
+        relTol          0;
     }
 
     "(CH4|CO|H2)Final"
     {
-        $(CH4|CO|H2);
+        $CH4;
         relTol          0;
     }
 }

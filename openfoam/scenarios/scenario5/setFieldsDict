@@ -1,12 +1,22 @@
 /*--------------------------------*- C++ -*----------------------------------*\
   =========                 |
   \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox
-   \\    /   O peration     | Version:  v8
+   \\    /   O peration     | Version:  v13
     \\  /    A nd           | Web:      www.OpenFOAM.org
      \\/     M anipulation  |
 \*---------------------------------------------------------------------------*/
 FoamFile { version 2.0; format ascii; class dictionary; object setFieldsDict; }
-// Scenario 5 - Emergency Gas Release. Large-scale blowout. Near-total DANGER.
+// Scenario 5 — Emergency Gas Release / Blowout (2.0 m/s ventilation).
+//
+// Catastrophic initial state: gas at extreme concentrations throughout the
+// entire domain at t=0. Three blowout sources in scalarSourceTerms continue
+// injecting at maximum rate. CH4 exceeds LEL (5%) in chambers by t=0.
+// CO is immediately life-threatening. H2 immediately flammable.
+//
+// Despite full ventilation (2.0 m/s), source rates overwhelm dilution:
+//   Q_emission (each source) = 10 L/min >> Q_dilution ≈ 2.4 L/min per cell.
+//
+// Updated for 80 m geometry: both chambers + South Stub + full tunnel.
 defaultFieldValues
 (
     volScalarFieldValue CH4  0
@@ -15,34 +25,59 @@ defaultFieldValues
 );
 regions
 (
+    // Downstream tunnel section (post-junction-1 to outlet)
     boxToCell
     {
-        box  (18 0 0) (60 4 3);
+        box  (20 0 0) (80 4 3);
         fieldValues
         (
-            volScalarFieldValue CH4   0.080
-            volScalarFieldValue CO    0.0050
-            volScalarFieldValue H2    0.040
+            volScalarFieldValue CH4   0.075   // 7.5% — above LEL, DANGER
+            volScalarFieldValue CO    0.0045   // 4500 ppm — DANGER
+            volScalarFieldValue H2    0.035    // 3.5% — DANGER
         );
     }
+    // Chamber 1 — fully filled, above LEL
     boxToCell
     {
-        box  (28 4 0) (38 16 3);
+        box  (20 4 0) (30 16 3);
         fieldValues
         (
-            volScalarFieldValue CH4   0.100
-            volScalarFieldValue CO    0.0080
-            volScalarFieldValue H2    0.060
+            volScalarFieldValue CH4   0.090   // 9.0% — well above LEL
+            volScalarFieldValue CO    0.0070   // 7000 ppm — lethal
+            volScalarFieldValue H2    0.055    // 5.5% — above LEL
         );
     }
+    // Chamber 2 — fully filled, above LEL
     boxToCell
     {
-        box  (0 0 0) (18 4 3);
+        box  (50 4 0) (62 20 3);
         fieldValues
         (
-            volScalarFieldValue CH4   0.015
-            volScalarFieldValue CO    0.0005
-            volScalarFieldValue H2    0.008
+            volScalarFieldValue CH4   0.100   // 10.0% — maximum seeded
+            volScalarFieldValue CO    0.0080   // 8000 ppm — lethal
+            volScalarFieldValue H2    0.060    // 6.0% — above LEL
+        );
+    }
+    // South Stub — fully filled
+    boxToCell
+    {
+        box  (35 -6 0) (43 0 3);
+        fieldValues
+        (
+            volScalarFieldValue CH4   0.050
+            volScalarFieldValue CO    0.0030
+            volScalarFieldValue H2    0.028
+        );
+    }
+    // Upstream tunnel (inlet section) — partially filled
+    boxToCell
+    {
+        box  (0 0 0) (20 4 3);
+        fieldValues
+        (
+            volScalarFieldValue CH4   0.015   // 1.5% — WARNING (not yet DANGER)
+            volScalarFieldValue CO    0.0005   // 500 ppm — DANGER threshold
+            volScalarFieldValue H2    0.008    // 0.8% — WARNING
         );
     }
 );

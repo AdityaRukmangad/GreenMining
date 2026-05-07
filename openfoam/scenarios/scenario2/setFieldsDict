@@ -1,12 +1,19 @@
 /*--------------------------------*- C++ -*----------------------------------*\
   =========                 |
   \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox
-   \\    /   O peration     | Version:  v8
+   \\    /   O peration     | Version:  v13
     \\  /    A nd           | Web:      www.OpenFOAM.org
      \\/     M anipulation  |
 \*---------------------------------------------------------------------------*/
 FoamFile { version 2.0; format ascii; class dictionary; object setFieldsDict; }
-// Scenario 2 - Moderate Syngas Leak. Gas pocket near junction. WARNING zones expected.
+// Scenario 2 — Moderate Syngas Leak (1.5 m/s ventilation).
+//
+// Initial gas pocket near the Chamber 1 junction entrance — represents
+// a pre-existing accumulation from a previous shift before ventilation
+// was partially restored. Active source in scalarSourceTerms drives
+// ongoing emission from x=18 m (seam seepage point).
+//
+// Geometry updated for 80 m tunnel: Chamber 1 at x=[20,30], y=[4,16].
 defaultFieldValues
 (
     volScalarFieldValue CH4  0
@@ -17,12 +24,12 @@ regions
 (
     boxToCell
     {
-        box  (20 0.5 0) (28 3.5 3);
+        box  (14 0.5 0) (20 3.5 3);   // gas pocket in tunnel approach to Ch1
         fieldValues
         (
-            volScalarFieldValue CH4   0.020
-            volScalarFieldValue CO    0.0003
-            volScalarFieldValue H2    0.010
+            volScalarFieldValue CH4   0.020   // 2.0% vol — 40% of LEL (WARNING)
+            volScalarFieldValue CO    0.0003   // 300 ppm  — 6x OSHA PEL (DANGER)
+            volScalarFieldValue H2    0.010    // 1.0% vol — 25% of LEL (WARNING)
         );
     }
 );
