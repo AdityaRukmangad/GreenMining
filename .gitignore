@@ -113,13 +113,19 @@ temp/
 # Uncomment if needed
 # =========================================
 
-# data/
-# outputs/
+data/
+outputs/
 results/
-# checkpoints/
-# models/
-# *.csv
-# *.parquet
-# *.h5
-# *.pt
-# *.pth
+reports/
+reports_*/
+checkpoints/
+models/
+models_*/
+*.csv
+*.parquet
+*.h5
+*.pt
+*.pth
+
+# Keep repo structure placeholders if used
+!.gitkeep
