@@ -57,21 +57,20 @@ def _parse_scalar(text, n):
         return np.full(n, float(m.group(1)))
     raise ValueError("Cannot parse scalar internalField")
 
-
 def _parse_vector(text, n):
-    m = _LIST_VECTOR_RE.search(text)
-    if m:
-        triplets = re.findall(
-            r"\(\s*([\d.eE+\-]+)\s+([\d.eE+\-]+)\s+([\d.eE+\-]+)\s*\)", m.group(2)
-        )
-        arr = np.array([(float(a), float(b), float(c)) for a, b, c in triplets])
-        return arr[:n, 0], arr[:n, 1], arr[:n, 2]
-    m = _UNIFORM_VECTOR_RE.search(text)
-    if m:
-        return (np.full(n, float(m.group(1))),
-                np.full(n, float(m.group(2))),
-                np.full(n, float(m.group(3))))
-    raise ValueError("Cannot parse vector internalField")
+    import re
+    import numpy as np
+
+    # Match all vector entries like:
+    # (1.0 2.0 3.0)
+    matches = re.findall(
+        r"\(\s*([Ee0-9+\-.]+)\s+([Ee0-9+\-.]+)\s+([Ee0-9+\-.]+)\s*\)",
+        text
+    )
+
+    arr = np.array(matches, dtype=float)
+
+    return arr[:n, 0], arr[:n, 1], arr[:n, 2]
 
 
 def read_field(path, n, kind="scalar"):
@@ -98,10 +97,10 @@ def find_time_dirs(case_dir):
 
 def read_cell_centres(time_dirs, n):
     for _, td in reversed(time_dirs):
-        if (td / "Cx").exists():
-            return (read_field(td / "Cx", n),
-                    read_field(td / "Cy", n),
-                    read_field(td / "Cz", n))
+        if (td / "Ccx").exists():
+            return (read_field(td / "Ccx", n),
+                    read_field(td / "Ccy", n),
+                    read_field(td / "Ccz", n))
     raise FileNotFoundError(
         "Cx/Cy/Cz not found. Run simulation to completion or: "
         "postProcess -func writeCellCentres"

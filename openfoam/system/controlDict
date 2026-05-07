@@ -72,8 +72,8 @@ functions
     writeCellCentres
     {
         type            writeCellCentres;
-        libs            (fieldFunctionObjects);
-        writeControl    onEnd;
+        libs            ("libfieldFunctionObjects.so");
+        writeControl    writeTime;
     }
 
     // ================================================================== //
@@ -229,8 +229,8 @@ functions
     probes
     {
         type            probes;
-        libs            (sampling);
-        writeControl    timeStep;
+        libs            ("libsampling.so");
+        writeControl    writeTime;
         writeInterval   5;
         fields          (U p T CH4 CO H2);
         probeLocations

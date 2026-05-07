@@ -1,0 +1,38 @@
+/*---------------------------------------------------------------------------*\
+  =========                 |
+  \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox
+   \\    /   O peration     | Website:  https://openfoam.org
+    \\  /    A nd           | Version:  13
+     \\/     M anipulation  |
+\*---------------------------------------------------------------------------*/
+Build  : 13-441953dfbb42
+Exec   : setFields
+Date   : May 07 2026
+Time   : 07:44:23
+Host   : "DashX"
+PID    : 8328
+I/O    : uncollated
+Case   : /home/anujd/IDP/GreenMining/openfoam
+nProcs : 1
+sigFpe : Enabling floating point exception trapping (FOAM_SIGFPE).
+fileModificationChecking : Monitoring run-time modified files using timeStampMaster (fileModificationSkew 10)
+allowSystemOperations : Allowing user-supplied system call operations
+
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+Create time
+
+Create mesh for time = 0
+
+Reading "setFieldsDict"
+
+Setting field default values
+    The 'defaultFieldValues' entry is deprecated, please use 'default'
+    Setting internal values of volScalarField CH4
+    Setting internal values of volScalarField CO
+    Setting internal values of volScalarField H2
+
+Setting field region values
+    The 'regions' entry is deprecated, please use 'zones'
+
+End
+

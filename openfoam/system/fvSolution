@@ -99,7 +99,7 @@ PIMPLE
 {
     nOuterCorrectors        2;
     nCorrectors             2;
-    nNonOrthogonalCorrectors 1;
+	    nNonOrthogonalCorrectors 1;
     turbOnFinalIterOnly     false;
 
     // Reference pressure for compressible solver: sets absolute level.

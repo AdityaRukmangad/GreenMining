@@ -1,22 +1,20 @@
 /*--------------------------------*- C++ -*----------------------------------*\
   =========                 |
   \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox
-   \\    /   O peration     | Version:  v8
-    \\  /    A nd           | Web:      www.OpenFOAM.org
+   \\    /   O peration     | Website:  https://openfoam.org
+    \\  /    A nd           | Version:  13
      \\/     M anipulation  |
 \*---------------------------------------------------------------------------*/
 FoamFile
 {
-    version     2.0;
     format      ascii;
     class       volScalarField;
     location    "0";
     object      H2;
 }
-// Hydrogen volume fraction (0-1). LEL=0.04. DANGER threshold: 0.02
-// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 
-dimensions      [0 0 0 0 0 0 0];
+dimensions      [];
 
 internalField   uniform 0;
 
@@ -27,18 +25,17 @@ boundaryField
         type            fixedValue;
         value           uniform 0;
     }
-
     outlet
     {
         type            inletOutlet;
         inletValue      uniform 0;
         value           uniform 0;
     }
-
     walls
     {
         type            zeroGradient;
     }
 }
+
 
 // ************************************************************************* //
