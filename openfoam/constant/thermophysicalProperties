@@ -1,0 +1,68 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+  =========                 |
+  \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox
+   \\    /   O peration     | Version:  v13
+    \\  /    A nd           | Web:      www.OpenFOAM.org
+     \\/     M anipulation  |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    location    "constant";
+    object      thermophysicalProperties;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+//
+// Air treated as an ideal gas with constant Cp.
+//
+// thermoType breakdown:
+//   heRhoThermo  — density-based enthalpy thermo (rho = f(p,T))
+//   pureMixture  — single-component fluid (no mixing)
+//   const        — constant dynamic viscosity and Prandtl number
+//   hConst       — constant Cp (no JANAF polynomials needed)
+//   perfectGas   — rho = p / (R_specific * T)
+//   specie       — tracks molecular weight
+//   sensibleEnthalpy — solve energy equation in terms of h
+//
+// Cross-check at 293 K, 101325 Pa (standard mine ambient):
+//   R_specific = 8314 / 28.97 = 286.9 J/(kg·K)
+//   rho = 101325 / (286.9 * 293) = 1.205 kg/m³
+//   nu  = mu / rho = 1.81e-5 / 1.205 = 1.50e-5 m²/s  (matches transport data)
+//
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+thermoType
+{
+    type            heRhoThermo;
+    mixture         pureMixture;
+    transport       const;
+    thermo          hConst;
+    equationOfState perfectGas;
+    specie          specie;
+    energy          sensibleEnthalpy;
+}
+
+mixture
+{
+    specie
+    {
+        nMoles      1;
+        molWeight   28.97;      // g/mol  — dry air
+    }
+
+    thermodynamics
+    {
+        Cp          1005;       // J/(kg·K) — specific heat at constant pressure
+        Hf          0;          // J/kg     — heat of formation (zero for air)
+    }
+
+    transport
+    {
+        mu          1.81e-5;    // Pa·s     — dynamic viscosity at 293 K
+        Pr          0.71;       // —         laminar Prandtl number
+    }
+}
+
+// ************************************************************************* //

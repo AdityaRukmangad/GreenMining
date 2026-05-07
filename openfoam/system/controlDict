@@ -1,0 +1,129 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+  =========                 |
+  \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox
+   \\    /   O peration     | Version:  v13
+    \\  /    A nd           | Web:      www.OpenFOAM.org
+     \\/     M anipulation  |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    location    "system";
+    object      controlDict;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+//
+// v13 migration:
+//   application  buoyantBoussinesqPimpleFoam  -->  foamRun
+//   solver       (baked into old app)          -->  fluid
+//
+// The "fluid" solver module is the v13 successor to buoyantPimpleFoam.
+// It solves compressible buoyant flow using the full energy equation.
+// Species CH4/CO/H2 are transported as passive scalars via function objects.
+//
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+application     foamRun;
+solver          fluid;
+
+startFrom       startTime;
+startTime       0;
+
+stopAt          endTime;
+endTime         300;            // 5 minutes mine-time
+
+deltaT          0.05;           // initial dt; Courant-limited
+
+writeControl    adjustableRunTime;
+writeInterval   15;             // snapshot every 15 s
+
+purgeWrite      0;
+writeFormat     ascii;
+writePrecision  8;
+writeCompression off;
+
+timeFormat      general;
+timePrecision   6;
+
+runTimeModifiable true;
+
+adjustTimeStep  yes;
+maxCo           0.5;            // conservative for buoyant compressible
+maxDeltaT       0.5;
+
+// ---- Function objects -------------------------------------------------- //
+
+functions
+{
+    // Cell centres written once at end for Python postprocessor geo-location
+    writeCellCentres
+    {
+        type            writeCellCentres;
+        libs            (fieldFunctionObjects);
+        writeControl    onEnd;
+    }
+
+    // Passive scalar transport for syngas species.
+    // Solves:  d(phi)/dt + div(U,phi) = div(Deff*grad(phi))
+    // where Deff = D_molecular + nu_t/Sc_t  (turbulent Schmidt = 0.7)
+    // Valid for low-concentration syngas in air (dilute approximation).
+
+    scalarTransportCH4
+    {
+        type            scalarTransport;
+        libs            (solverFunctionObjects);
+        field           CH4;
+        D               2.2e-5;     // [m2/s] molecular diffusivity at 293 K
+        nCorr           2;
+        resetOnStartUp  no;
+        writeControl    writeTime;
+    }
+
+    scalarTransportCO
+    {
+        type            scalarTransport;
+        libs            (solverFunctionObjects);
+        field           CO;
+        D               2.0e-5;
+        nCorr           2;
+        resetOnStartUp  no;
+        writeControl    writeTime;
+    }
+
+    scalarTransportH2
+    {
+        type            scalarTransport;
+        libs            (solverFunctionObjects);
+        field           H2;
+        D               7.5e-5;     // H2 diffuses ~3x faster than CH4
+        nCorr           2;
+        resetOnStartUp  no;
+        writeControl    writeTime;
+    }
+
+    // Nine probe points covering inlet, tunnel body, junction, and dead end
+    probes
+    {
+        type            probes;
+        libs            (sampling);
+        writeControl    timeStep;
+        writeInterval   5;
+        fields          (U p T CH4 CO H2);
+        probeLocations
+        (
+            ( 5  2  1.5)    // p1  inlet region
+            (14  2  1.5)    // p2  upstream tunnel
+            (25  2  1.5)    // p3  approach to junction
+            (33  2  1.5)    // p4  junction centre
+            (45  2  1.5)    // p5  downstream tunnel
+            (55  2  1.5)    // p6  outlet region
+            (33  8  1.5)    // p7  lower side chamber
+            (33 12  1.5)    // p8  mid side chamber
+            (33 15  1.5)    // p9  dead end (highest accumulation risk)
+        );
+    }
+}
+
+// ************************************************************************* //

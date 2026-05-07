@@ -1,0 +1,44 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+  =========                 |
+  \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox
+   \\    /   O peration     | Version:  v13
+    \\  /    A nd           | Web:      www.OpenFOAM.org
+     \\/     M anipulation  |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       volScalarField;
+    location    "0";
+    object      p;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+//
+// Thermodynamic (absolute) pressure [Pa].
+//
+// In the compressible fluid solver:
+//   p_rgh = p - rho*g*h   (working variable solved by PIMPLE)
+//   p     = p_rgh + rho*g*h  (reconstructed each iteration)
+//
+// p is therefore a DERIVED field — boundaries are "calculated".
+// The solver initialises rho from p and T:
+//   rho = p / (R_specific * T) = 101325 / (286.9 * 293) = 1.205 kg/m³
+//
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+dimensions      [1 -1 -2 0 0 0 0];     // kg/(m·s²) = Pa
+
+internalField   uniform 101325;         // standard atmospheric pressure
+
+boundaryField
+{
+    // p is always reconstructed from p_rgh; BCs are informational only
+    default
+    {
+        type            calculated;
+        value           uniform 101325;
+    }
+}
+
+// ************************************************************************* //

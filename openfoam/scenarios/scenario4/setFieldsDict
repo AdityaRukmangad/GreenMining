@@ -1,0 +1,39 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+  =========                 |
+  \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox
+   \\    /   O peration     | Version:  v8
+    \\  /    A nd           | Web:      www.OpenFOAM.org
+     \\/     M anipulation  |
+\*---------------------------------------------------------------------------*/
+FoamFile { version 2.0; format ascii; class dictionary; object setFieldsDict; }
+// Scenario 4 - Dead-Zone Accumulation. Gas trapped in side chamber. Localised DANGER.
+defaultFieldValues
+(
+    volScalarFieldValue CH4  0
+    volScalarFieldValue CO   0
+    volScalarFieldValue H2   0
+);
+regions
+(
+    boxToCell
+    {
+        box  (28 4 0) (38 16 3);
+        fieldValues
+        (
+            volScalarFieldValue CH4   0.040
+            volScalarFieldValue CO    0.0020
+            volScalarFieldValue H2    0.025
+        );
+    }
+    boxToCell
+    {
+        box  (26 0 0) (40 4 3);
+        fieldValues
+        (
+            volScalarFieldValue CH4   0.012
+            volScalarFieldValue CO    0.0004
+            volScalarFieldValue H2    0.006
+        );
+    }
+);
+// ************************************************************************* //
