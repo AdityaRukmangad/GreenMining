@@ -82,9 +82,9 @@ METRIC_DIR = REPORT_DIR / "metrics"
 
 RANDOM_STATE    = 42
 BATCH_SIZE      = 128
-LEARNING_RATE   = 5e-4
-EPOCHS          = 50
-PATIENCE        = 10
+LEARNING_RATE   = 1e-4
+EPOCHS          = 60
+PATIENCE        = 12
 GRAPH_HIDDEN    = 128     # GAT output per head × heads
 GAT_HEADS       = 4
 TEMPORAL_HIDDEN = 128
@@ -417,8 +417,8 @@ def main():
     all_train_labels = np.concatenate([g.y.numpy().flatten() for g in train_graphs])
     n_pos = all_train_labels.sum()
     n_neg = len(all_train_labels) - n_pos
-    pos_weight_val = float(n_neg / max(n_pos, 1))
-    print(f"pos_weight: {pos_weight_val:.3f}  (neg/pos in train nodes)")
+    pos_weight_val = float(min(n_neg / max(n_pos, 1), 6.0))   # cap to avoid loss explosion
+    print(f"pos_weight: {pos_weight_val:.3f}  (neg/pos in train nodes, capped at 6)")
 
     # ------------------------------------------------------------------
     # Model
@@ -437,8 +437,8 @@ def main():
     criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight_tensor)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE, weight_decay=1e-5)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
-        optimizer, T_0=10, T_mult=2, eta_min=1e-6,
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, mode="min", factor=0.5, patience=5, min_lr=1e-6, verbose=True,
     )
 
     use_amp    = (DEVICE.type == "cuda")
@@ -471,7 +471,7 @@ def main():
         train_losses.append(train_loss)
         val_losses.append(val_loss)
 
-        scheduler.step(epoch + val_loss)
+        scheduler.step(val_loss)
 
         print(
             f"Epoch {epoch+1:02d}/{EPOCHS} | "
