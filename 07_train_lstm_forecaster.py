@@ -1,16 +1,21 @@
 """
-Phase 7 — Train LSTM Hazard Forecaster
-======================================
+Phase 7 — Train Improved LSTM Hazard Forecaster
+================================================
 
-Train a temporal LSTM model for future hazard prediction.
+Architecture upgrade: BiLSTM + Multi-Head Temporal Attention
+-------------------------------------------------------------
+Input  : [t-45, t-30, t-15, t]  →  4 timesteps × 38 features
+Predict: hazard at t+30s
 
-Task
-----
-Input:
-    [t-45, t-30, t-15, t]
-
-Predict:
-    hazard at t+30s
+Improvements over v1
+--------------------
+- Bidirectional LSTM (256 hidden × 3 layers)
+- Multi-head self-attention over time dimension
+- Layer-norm residual connection
+- GELU activations in classifier head
+- CosineAnnealingWarmRestarts LR schedule
+- F2-based threshold tuning on validation set (recall-prioritised)
+- Explicit false-negative count in metrics
 
 Outputs
 -------
@@ -18,7 +23,6 @@ models_lstm/
 reports_lstm/
 """
 
-import argparse
 import json
 import random
 from pathlib import Path
@@ -32,18 +36,9 @@ import numpy as np
 
 import torch
 import torch.nn as nn
-
-from torch.utils.data import (
-    DataLoader,
-    TensorDataset,
-)
-
-# ============================================================================
-# Performance
-# ============================================================================
+from torch.utils.data import DataLoader, TensorDataset
 
 torch.backends.cudnn.benchmark = True
-
 torch.set_float32_matmul_precision("high")
 
 # ============================================================================
@@ -54,6 +49,7 @@ from sklearn.metrics import (
     accuracy_score,
     classification_report,
     confusion_matrix,
+    fbeta_score,
     roc_auc_score,
     roc_curve,
 )
@@ -64,479 +60,243 @@ from sklearn.metrics import (
 
 import matplotlib
 matplotlib.use("Agg")
-
 import matplotlib.pyplot as plt
 
 # ============================================================================
-# Repository paths
+# Paths
 # ============================================================================
 
-REPO_ROOT = Path(__file__).resolve().parent
-
-DATA_DIR = REPO_ROOT / "data" / "lstm"
-
+REPO_ROOT  = Path(__file__).resolve().parent
+DATA_DIR   = REPO_ROOT / "data" / "lstm"
 MODELS_DIR = REPO_ROOT / "models_lstm"
-
 REPORTS_DIR = REPO_ROOT / "reports_lstm"
-
 METRICS_DIR = REPORTS_DIR / "metrics"
-
-PLOTS_DIR = REPORTS_DIR / "plots"
+PLOTS_DIR   = REPORTS_DIR / "plots"
 
 # ============================================================================
-# Configuration
+# Hyper-parameters
 # ============================================================================
 
-RANDOM_STATE = 42
-
-BATCH_SIZE = 4096
-
-LEARNING_RATE = 1e-3
-
-EPOCHS = 50
-
-PATIENCE = 8
-
-HIDDEN_SIZE = 128
-
-NUM_LAYERS = 2
-
-DROPOUT = 0.2
-
-GRAD_CLIP = 1.0
+RANDOM_STATE   = 42
+BATCH_SIZE     = 2048
+LEARNING_RATE  = 5e-4
+EPOCHS         = 100
+PATIENCE       = 15
+HIDDEN_SIZE    = 256
+NUM_LAYERS     = 3
+N_HEADS        = 8       # attention heads (must divide HIDDEN_SIZE*2)
+DROPOUT        = 0.3
+GRAD_CLIP      = 1.0
+FBETA          = 2.0     # β for threshold search (recall-weighted)
 
 # ============================================================================
 # Reproducibility
 # ============================================================================
 
 def set_seed(seed=RANDOM_STATE):
-
     random.seed(seed)
-
     np.random.seed(seed)
-
     torch.manual_seed(seed)
-
     torch.cuda.manual_seed_all(seed)
 
-# ============================================================================
-# Device
-# ============================================================================
-
-DEVICE = (
-    "cuda"
-    if torch.cuda.is_available()
-    else "cpu"
-)
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 # ============================================================================
-# LSTM Model
+# Model — BiLSTM + Temporal Attention
 # ============================================================================
 
-class HazardLSTM(nn.Module):
+class HazardTemporalNet(nn.Module):
+    """
+    Bidirectional LSTM with multi-head self-attention over the time axis.
+
+    Residual + LayerNorm stabilise training and help gradients flow.
+    """
 
     def __init__(
         self,
         input_size,
-        hidden_size=64,
-        num_layers=2,
-        dropout=0.2,
+        hidden_size=HIDDEN_SIZE,
+        num_layers=NUM_LAYERS,
+        n_heads=N_HEADS,
+        dropout=DROPOUT,
     ):
-
         super().__init__()
 
+        # Project raw features into model dimension
+        self.input_proj = nn.Sequential(
+            nn.Linear(input_size, hidden_size),
+            nn.LayerNorm(hidden_size),
+        )
+
+        # Bidirectional LSTM — output dim = hidden_size * 2
         self.lstm = nn.LSTM(
-            input_size=input_size,
-            hidden_size=HIDDEN_SIZE,
-            num_layers=NUM_LAYERS,
-            dropout=DROPOUT,
+            input_size=hidden_size,
+            hidden_size=hidden_size,
+            num_layers=num_layers,
+            dropout=dropout if num_layers > 1 else 0.0,
+            batch_first=True,
+            bidirectional=True,
+        )
+
+        lstm_out_dim = hidden_size * 2
+
+        # Multi-head self-attention over time steps
+        self.attn = nn.MultiheadAttention(
+            embed_dim=lstm_out_dim,
+            num_heads=n_heads,
+            dropout=dropout,
             batch_first=True,
         )
 
+        self.norm = nn.LayerNorm(lstm_out_dim)
+        self.drop = nn.Dropout(dropout)
+
+        # Classifier head
         self.fc = nn.Sequential(
-
-            nn.Linear(hidden_size, hidden_size),
-
-            nn.ReLU(),
-
+            nn.Linear(lstm_out_dim, hidden_size),
+            nn.GELU(),
             nn.Dropout(dropout),
-
-            nn.Linear(hidden_size, 1)
+            nn.Linear(hidden_size, hidden_size // 2),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_size // 2, 1),
         )
 
     def forward(self, x):
+        # x: [B, T, F]
+        x = self.input_proj(x)          # [B, T, H]
+        lstm_out, _ = self.lstm(x)       # [B, T, 2H]
 
-        out, _ = self.lstm(x)
+        attn_out, _ = self.attn(lstm_out, lstm_out, lstm_out)
+        out = self.norm(lstm_out + attn_out)   # residual
 
-        out = out[:, -1, :]
+        out = out[:, -1, :]             # last timestep  [B, 2H]
+        out = self.drop(out)
 
-        out = self.fc(out)
-
-        return out.squeeze(1)
+        return self.fc(out).squeeze(1)  # [B]
 
 # ============================================================================
-# Normalization
+# Normalisation (fit on train, apply to all)
 # ============================================================================
 
-def normalize_data(
-    train_X,
-    val_X,
-    test_X,
-):
+def normalize_data(train_X, val_X, test_X):
+    print("\nNormalising datasets ...")
+    mean = train_X.mean(axis=(0, 1), keepdims=True)
+    std  = train_X.std(axis=(0, 1),  keepdims=True)
+    std  = np.where(std < 1e-8, 1.0, std)
+    train_X = (train_X - mean) / std
+    val_X   = (val_X   - mean) / std
+    test_X  = (test_X  - mean) / std
+    return train_X, val_X, test_X, {"mean": mean, "std": std}
 
-    print("\nNormalizing datasets ...")
+# ============================================================================
+# Threshold optimisation (F-beta on validation)
+# ============================================================================
 
-    mean = train_X.mean(
-        axis=(0, 1),
-        keepdims=True
-    )
-
-    std = train_X.std(
-        axis=(0, 1),
-        keepdims=True
-    )
-
-    std = np.where(
-        std < 1e-8,
-        1.0,
-        std
-    )
-
-    train_X = (
-        train_X - mean
-    ) / std
-
-    val_X = (
-        val_X - mean
-    ) / std
-
-    test_X = (
-        test_X - mean
-    ) / std
-
-    scaler = {
-        "mean": mean,
-        "std": std,
-    }
-
-    return (
-        train_X,
-        val_X,
-        test_X,
-        scaler,
-    )
+def find_optimal_threshold(y_true, y_prob, beta=FBETA):
+    best_t, best_score = 0.5, -1.0
+    for t in np.arange(0.10, 0.90, 0.005):
+        y_hat = (y_prob >= t).astype(int)
+        score = fbeta_score(y_true, y_hat, beta=beta, pos_label=1, zero_division=0)
+        if score > best_score:
+            best_score = score
+            best_t = float(t)
+    return best_t, best_score
 
 # ============================================================================
 # Evaluation
 # ============================================================================
 
-def evaluate_model(
-    model,
-    loader,
-):
-
+def evaluate_model(model, loader, threshold=0.5):
     model.eval()
-
-    all_probs = []
-
-    all_preds = []
-
-    all_targets = []
+    all_probs, all_targets = [], []
 
     with torch.no_grad():
-
         for X, y in loader:
-
-            X = X.to(
-                DEVICE,
-                non_blocking=True
-            )
-
+            X = X.to(DEVICE, non_blocking=True)
             logits = model(X)
+            probs  = torch.sigmoid(logits)
+            all_probs.extend(probs.cpu().numpy())
+            all_targets.extend(y.numpy())
 
-            probs = torch.sigmoid(logits)
-
-            preds = (
-                probs >= 0.5
-            ).long()
-
-            all_probs.extend(
-                probs.cpu().numpy()
-            )
-
-            all_preds.extend(
-                preds.cpu().numpy()
-            )
-
-            all_targets.extend(
-                y.numpy()
-            )
-
-    all_probs = np.array(all_probs)
-
-    all_preds = np.array(all_preds)
-
-    all_targets = np.array(all_targets)
-
-    # ----------------------------------------------------------------------
-    # Diagnostics
-    # ----------------------------------------------------------------------
+    all_probs   = np.array(all_probs,   dtype=np.float32)
+    all_targets = np.array(all_targets, dtype=np.int32)
+    all_preds   = (all_probs >= threshold).astype(np.int32)
 
     print("\nPrediction distribution:")
-
-    unique, counts = np.unique(
-        all_preds,
-        return_counts=True
-    )
-
+    unique, counts = np.unique(all_preds, return_counts=True)
     for u, c in zip(unique, counts):
-
         print(f"  Pred {u}: {c:,}")
-
-    print("\nTarget distribution:")
-
-    unique, counts = np.unique(
-        all_targets,
-        return_counts=True
-    )
-
+    print("Target distribution:")
+    unique, counts = np.unique(all_targets, return_counts=True)
     for u, c in zip(unique, counts):
-
         print(f"  True {u}: {c:,}")
 
-    # ----------------------------------------------------------------------
-    # Metrics
-    # ----------------------------------------------------------------------
+    report = classification_report(all_targets, all_preds, output_dict=True, zero_division=0)
+    cm     = confusion_matrix(all_targets, all_preds)
 
-    metrics = {}
-
-    metrics["accuracy"] = float(
-        accuracy_score(
-            all_targets,
-            all_preds
-        )
-    )
-    
-    all_targets = all_targets.astype(int)
-    all_preds = all_preds.astype(int)
-
-    report = classification_report(
-        all_targets,
-        all_preds,
-        output_dict=True,
-        zero_division=0,
-    )
-
-    metrics["precision_macro"] = float(
-        report["macro avg"]["precision"]
-    )
-
-    metrics["recall_macro"] = float(
-        report["macro avg"]["recall"]
-    )
-
-    metrics["f1_macro"] = float(
-        report["macro avg"]["f1-score"]
-    )
-
-    metrics["class_0_recall"] = float(
-        report.get("0", {}).get("recall", 0.0)
-    )
-
-    metrics["class_0_precision"] = float(
-        report.get("0", {}).get("precision", 0.0)
-    )
-
-    metrics["class_1_recall"] = float(
-        report.get("1", {}).get("recall", 0.0)
-    )
-
-    metrics["class_1_precision"] = float(
-        report.get("1", {}).get("precision", 0.0)
-    )
+    metrics = {
+        "threshold":        threshold,
+        "accuracy":         float(accuracy_score(all_targets, all_preds)),
+        "precision_macro":  float(report["macro avg"]["precision"]),
+        "recall_macro":     float(report["macro avg"]["recall"]),
+        "f1_macro":         float(report["macro avg"]["f1-score"]),
+        "class_0_recall":   float(report.get("0", {}).get("recall",    0.0)),
+        "class_0_precision":float(report.get("0", {}).get("precision", 0.0)),
+        "class_1_recall":   float(report.get("1", {}).get("recall",    0.0)),
+        "class_1_precision":float(report.get("1", {}).get("precision", 0.0)),
+        "false_negatives":  int(cm[1, 0]) if cm.shape == (2, 2) else -1,
+        "false_positives":  int(cm[0, 1]) if cm.shape == (2, 2) else -1,
+    }
 
     try:
-
-        metrics["roc_auc"] = float(
-            roc_auc_score(
-                all_targets,
-                all_probs
-            )
-        )
-
+        metrics["roc_auc"] = float(roc_auc_score(all_targets, all_probs))
     except ValueError:
-
         metrics["roc_auc"] = 0.0
 
-        print(
-            "\nWARNING: ROC-AUC could not be computed."
-        )
-
-    return (
-        metrics,
-        all_targets,
-        all_preds,
-        all_probs,
-    )
+    return metrics, all_targets, all_preds, all_probs
 
 # ============================================================================
 # Plotting
 # ============================================================================
 
-def save_confusion_matrix(
-    y_true,
-    y_pred,
-):
-
-    cm = confusion_matrix(
-        y_true,
-        y_pred
-    )
-
+def save_confusion_matrix(y_true, y_pred):
+    cm = confusion_matrix(y_true, y_pred)
     fig, ax = plt.subplots(figsize=(6, 5))
-
-    ax.imshow(cm)
-
-    ax.set_xticks([0, 1])
-
-    ax.set_yticks([0, 1])
-
-    ax.set_xticklabels([
-        "SAFE",
-        "HAZARD"
-    ])
-
-    ax.set_yticklabels([
-        "SAFE",
-        "HAZARD"
-    ])
-
-    ax.set_xlabel("Predicted")
-
-    ax.set_ylabel("Actual")
-
+    ax.imshow(cm, cmap="Blues")
     for i in range(2):
         for j in range(2):
-
-            ax.text(
-                j,
-                i,
-                cm[i, j],
-                ha="center",
-                va="center",
-            )
-
-    ax.set_title(
-        "LSTM Forecast Confusion Matrix"
-    )
-
-    path = (
-        PLOTS_DIR /
-        "confusion_matrix.png"
-    )
-
-    fig.savefig(
-        path,
-        dpi=120,
-        bbox_inches="tight"
-    )
-
+            ax.text(j, i, cm[i, j], ha="center", va="center")
+    ax.set_xticks([0, 1]); ax.set_xticklabels(["SAFE", "HAZARD"])
+    ax.set_yticks([0, 1]); ax.set_yticklabels(["SAFE", "HAZARD"])
+    ax.set_xlabel("Predicted"); ax.set_ylabel("Actual")
+    ax.set_title("BiLSTM-Attn Confusion Matrix")
+    path = PLOTS_DIR / "confusion_matrix.png"
+    fig.savefig(path, dpi=120, bbox_inches="tight")
     plt.close(fig)
 
-def save_roc_curve(
-    y_true,
-    y_probs,
-):
 
-    fpr, tpr, _ = roc_curve(
-        y_true,
-        y_probs
-    )
-
-    auc = roc_auc_score(
-        y_true,
-        y_probs
-    )
-
+def save_roc_curve(y_true, y_probs):
+    fpr, tpr, _ = roc_curve(y_true, y_probs)
+    auc = roc_auc_score(y_true, y_probs)
     fig, ax = plt.subplots(figsize=(6, 5))
-
-    ax.plot(
-        fpr,
-        tpr,
-        label=f"AUC = {auc:.4f}"
-    )
-
-    ax.plot(
-        [0, 1],
-        [0, 1],
-        linestyle="--"
-    )
-
-    ax.set_xlabel(
-        "False Positive Rate"
-    )
-
-    ax.set_ylabel(
-        "True Positive Rate"
-    )
-
-    ax.set_title(
-        "LSTM Forecast ROC Curve"
-    )
-
+    ax.plot(fpr, tpr, label=f"AUC = {auc:.4f}")
+    ax.plot([0, 1], [0, 1], linestyle="--")
+    ax.set_xlabel("FPR"); ax.set_ylabel("TPR")
+    ax.set_title("BiLSTM-Attn ROC Curve")
     ax.legend()
-
-    path = (
-        PLOTS_DIR /
-        "roc_curve.png"
-    )
-
-    fig.savefig(
-        path,
-        dpi=120,
-        bbox_inches="tight"
-    )
-
+    fig.savefig(PLOTS_DIR / "roc_curve.png", dpi=120, bbox_inches="tight")
     plt.close(fig)
 
-def save_training_curve(
-    train_losses,
-    val_losses,
-):
 
+def save_training_curve(train_losses, val_losses):
     fig, ax = plt.subplots(figsize=(7, 5))
-
-    ax.plot(
-        train_losses,
-        label="Train Loss"
-    )
-
-    ax.plot(
-        val_losses,
-        label="Val Loss"
-    )
-
-    ax.set_xlabel("Epoch")
-
-    ax.set_ylabel("Loss")
-
-    ax.set_title(
-        "LSTM Training Curve"
-    )
-
+    ax.plot(train_losses, label="Train Loss")
+    ax.plot(val_losses,   label="Val Loss")
+    ax.set_xlabel("Epoch"); ax.set_ylabel("Loss")
+    ax.set_title("BiLSTM-Attn Training Curve")
     ax.legend()
-
-    path = (
-        PLOTS_DIR /
-        "training_curve.png"
-    )
-
-    fig.savefig(
-        path,
-        dpi=120,
-        bbox_inches="tight"
-    )
-
+    fig.savefig(PLOTS_DIR / "training_curve.png", dpi=120, bbox_inches="tight")
     plt.close(fig)
 
 # ============================================================================
@@ -544,456 +304,225 @@ def save_training_curve(
 # ============================================================================
 
 def main():
-
     print("=" * 72)
-    print("  GreenMining — Phase 7: LSTM Hazard Forecasting")
+    print("  GreenMining — Phase 7: BiLSTM + Attention Hazard Forecaster")
     print("=" * 72)
 
     set_seed()
-
     print(f"\nDevice: {DEVICE}")
-
     if torch.cuda.is_available():
+        print(f"GPU: {torch.cuda.get_device_name(0)}")
 
-        print(
-            f"GPU: "
-            f"{torch.cuda.get_device_name(0)}"
-        )
-
-    # ----------------------------------------------------------------------
+    # ------------------------------------------------------------------
     # Load data
-    # ----------------------------------------------------------------------
+    # ------------------------------------------------------------------
 
     print("\nLoading sequence datasets ...")
+    train_X = np.load(DATA_DIR / "train_X.npy")
+    train_y = np.load(DATA_DIR / "train_y.npy")
+    val_X   = np.load(DATA_DIR / "val_X.npy")
+    val_y   = np.load(DATA_DIR / "val_y.npy")
+    test_X  = np.load(DATA_DIR / "test_X.npy")
+    test_y  = np.load(DATA_DIR / "test_y.npy")
 
-    train_X = np.load(
-        DATA_DIR / "train_X.npy"
-    )
+    print(f"  Train X: {train_X.shape}  |  Val X: {val_X.shape}  |  Test X: {test_X.shape}")
 
-    train_y = np.load(
-        DATA_DIR / "train_y.npy"
-    )
+    # ------------------------------------------------------------------
+    # Normalise
+    # ------------------------------------------------------------------
 
-    val_X = np.load(
-        DATA_DIR / "val_X.npy"
-    )
+    train_X, val_X, test_X, scaler = normalize_data(train_X, val_X, test_X)
 
-    val_y = np.load(
-        DATA_DIR / "val_y.npy"
-    )
+    MODELS_DIR.mkdir(parents=True, exist_ok=True)
+    METRICS_DIR.mkdir(parents=True, exist_ok=True)
+    PLOTS_DIR.mkdir(parents=True, exist_ok=True)
 
-    test_X = np.load(
-        DATA_DIR / "test_X.npy"
-    )
+    joblib.dump(scaler, MODELS_DIR / "scaler.pkl")
 
-    test_y = np.load(
-        DATA_DIR / "test_y.npy"
-    )
-
-    print(f"  Train X: {train_X.shape}")
-    print(f"  Val X  : {val_X.shape}")
-    print(f"  Test X : {test_X.shape}")
-
-    # ----------------------------------------------------------------------
-    # Normalize
-    # ----------------------------------------------------------------------
-
-    (
-        train_X,
-        val_X,
-        test_X,
-        scaler,
-    ) = normalize_data(
-        train_X,
-        val_X,
-        test_X,
-    )
-
-    MODELS_DIR.mkdir(
-        parents=True,
-        exist_ok=True
-    )
-
-    joblib.dump(
-        scaler,
-        MODELS_DIR / "scaler.pkl"
-    )
-
-    # ----------------------------------------------------------------------
+    # ------------------------------------------------------------------
     # Tensor datasets
-    # ----------------------------------------------------------------------
+    # ------------------------------------------------------------------
 
-    train_ds = TensorDataset(
+    def make_loader(X, y, shuffle):
+        ds = TensorDataset(
+            torch.tensor(X, dtype=torch.float32),
+            torch.tensor(y, dtype=torch.float32),
+        )
+        return DataLoader(
+            ds, batch_size=BATCH_SIZE, shuffle=shuffle,
+            num_workers=4, pin_memory=True, persistent_workers=True,
+        )
 
-        torch.tensor(
-            train_X,
-            dtype=torch.float32
-        ),
+    train_loader = make_loader(train_X, train_y, shuffle=True)
+    val_loader   = make_loader(val_X,   val_y,   shuffle=False)
+    test_loader  = make_loader(test_X,  test_y,  shuffle=False)
 
-        torch.tensor(
-            train_y,
-            dtype=torch.float32
-        ),
-    )
-
-    val_ds = TensorDataset(
-
-        torch.tensor(
-            val_X,
-            dtype=torch.float32
-        ),
-
-        torch.tensor(
-            val_y,
-            dtype=torch.float32
-        ),
-    )
-
-    test_ds = TensorDataset(
-
-        torch.tensor(
-            test_X,
-            dtype=torch.float32
-        ),
-
-        torch.tensor(
-            test_y,
-            dtype=torch.float32
-        ),
-    )
-
-    train_loader = DataLoader(
-        train_ds,
-        batch_size=BATCH_SIZE,
-        shuffle=True,
-        num_workers=4,
-        pin_memory=True,
-        persistent_workers=True,
-    )
-
-    val_loader = DataLoader(
-        val_ds,
-        batch_size=BATCH_SIZE,
-        shuffle=False,
-        num_workers=4,
-        pin_memory=True,
-        persistent_workers=True,
-    )
-
-    test_loader = DataLoader(
-        test_ds,
-        batch_size=BATCH_SIZE,
-        shuffle=False,
-        num_workers=4,
-        pin_memory=True,
-        persistent_workers=True,
-    )
-
-    # ----------------------------------------------------------------------
+    # ------------------------------------------------------------------
     # Model
-    # ----------------------------------------------------------------------
+    # ------------------------------------------------------------------
 
     input_size = train_X.shape[2]
+    model = HazardTemporalNet(input_size=input_size).to(DEVICE)
 
-    model = HazardLSTM(
-        input_size=input_size,
-        hidden_size=HIDDEN_SIZE,
-        num_layers=NUM_LAYERS,
-        dropout=DROPOUT,
-    ).to(DEVICE)
+    n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print(f"\nModel parameters: {n_params:,}")
 
-    # ----------------------------------------------------------------------
-    # Loss
-    # ----------------------------------------------------------------------
-
-    pos_weight = (
-        len(train_y) - train_y.sum()
-    ) / train_y.sum()
+    # ------------------------------------------------------------------
+    # Loss — weighted to penalise false negatives
+    # ------------------------------------------------------------------
 
     pos_weight = torch.tensor(
-        pos_weight,
-        dtype=torch.float32
+        (len(train_y) - train_y.sum()) / train_y.sum(),
+        dtype=torch.float32,
     ).to(DEVICE)
+    print(f"BCEWithLogitsLoss pos_weight: {pos_weight.item():.3f}")
 
-    criterion = nn.BCEWithLogitsLoss(
-        pos_weight=pos_weight
+    criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
+    optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE, weight_decay=1e-5)
+
+    # CosineAnnealing: restarts every T0 epochs, double period each restart
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
+        optimizer, T_0=10, T_mult=2, eta_min=1e-6,
     )
 
-    optimizer = torch.optim.Adam(
-        model.parameters(),
-        lr=LEARNING_RATE,
-    )
+    use_amp   = torch.cuda.is_available()
+    scaler_amp = torch.cuda.amp.GradScaler() if use_amp else None
 
-    scaler_amp = torch.cuda.amp.GradScaler()
+    # ------------------------------------------------------------------
+    # Training
+    # ------------------------------------------------------------------
 
-    # ----------------------------------------------------------------------
-    # Skip training if model exists
-    # ----------------------------------------------------------------------
+    model_path  = MODELS_DIR / "best_lstm.pt"
 
-    model_path = (
-        MODELS_DIR /
-        "best_lstm.pt"
-    )
+    print("\nTraining BiLSTM + Attention ...")
 
-    if model_path.exists():
+    best_val_loss    = np.inf
+    patience_counter = 0
+    train_losses, val_losses = [], []
 
-        print(
-            "\nFound existing trained model."
-        )
+    for epoch in range(EPOCHS):
+        model.train()
+        running_loss = 0.0
 
-        print(
-            "Skipping training phase ..."
-        )
+        for X_batch, y_batch in train_loader:
+            X_batch = X_batch.to(DEVICE, non_blocking=True)
+            y_batch = y_batch.to(DEVICE, non_blocking=True)
+            optimizer.zero_grad()
 
-    else:
-
-        print("\nTraining LSTM ...")
-
-        best_val_loss = np.inf
-
-        patience_counter = 0
-
-        train_losses = []
-
-        val_losses = []
-
-        for epoch in range(EPOCHS):
-
-            model.train()
-
-            running_loss = 0.0
-
-            for X_batch, y_batch in train_loader:
-
-                X_batch = X_batch.to(
-                    DEVICE,
-                    non_blocking=True
-                )
-
-                y_batch = y_batch.to(
-                    DEVICE,
-                    non_blocking=True
-                )
-
-                optimizer.zero_grad()
-
+            if use_amp:
                 with torch.cuda.amp.autocast():
-
-                    logits = model(X_batch)
-
-                    loss = criterion(
-                        logits,
-                        y_batch
-                    )
-
-                scaler_amp.scale(
-                    loss
-                ).backward()
-
-                torch.nn.utils.clip_grad_norm_(
-                    model.parameters(),
-                    GRAD_CLIP
-                )
-
-                scaler_amp.step(
-                    optimizer
-                )
-
+                    loss = criterion(model(X_batch), y_batch)
+                scaler_amp.scale(loss).backward()
+                scaler_amp.unscale_(optimizer)
+                torch.nn.utils.clip_grad_norm_(model.parameters(), GRAD_CLIP)
+                scaler_amp.step(optimizer)
                 scaler_amp.update()
-
-                running_loss += (
-                    loss.item() *
-                    X_batch.size(0)
-                )
-
-            train_loss = (
-                running_loss /
-                len(train_loader.dataset)
-            )
-
-            train_losses.append(train_loss)
-
-            # --------------------------------------------------------------
-            # Validation
-            # --------------------------------------------------------------
-
-            model.eval()
-
-            val_running = 0.0
-
-            with torch.no_grad():
-
-                for X_batch, y_batch in val_loader:
-
-                    X_batch = X_batch.to(
-                        DEVICE,
-                        non_blocking=True
-                    )
-
-                    y_batch = y_batch.to(
-                        DEVICE,
-                        non_blocking=True
-                    )
-
-                    with torch.cuda.amp.autocast():
-
-                        logits = model(X_batch)
-
-                        loss = criterion(
-                            logits,
-                            y_batch
-                        )
-
-                    val_running += (
-                        loss.item() *
-                        X_batch.size(0)
-                    )
-
-            val_loss = (
-                val_running /
-                len(val_loader.dataset)
-            )
-
-            val_losses.append(val_loss)
-
-            print(
-                f"Epoch {epoch+1:02d}/{EPOCHS} | "
-                f"Train: {train_loss:.5f} | "
-                f"Val: {val_loss:.5f}"
-            )
-
-            # --------------------------------------------------------------
-            # Early stopping
-            # --------------------------------------------------------------
-
-            if val_loss < best_val_loss:
-
-                best_val_loss = val_loss
-
-                patience_counter = 0
-
-                torch.save(
-                    model.state_dict(),
-                    model_path
-                )
-
             else:
+                loss = criterion(model(X_batch), y_batch)
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(model.parameters(), GRAD_CLIP)
+                optimizer.step()
 
-                patience_counter += 1
+            running_loss += loss.item() * X_batch.size(0)
 
-                if patience_counter >= PATIENCE:
+        train_loss = running_loss / len(train_loader.dataset)
+        train_losses.append(train_loss)
 
-                    print(
-                        "\nEarly stopping triggered."
-                    )
+        # Validation
+        model.eval()
+        val_running = 0.0
+        with torch.no_grad():
+            for X_batch, y_batch in val_loader:
+                X_batch = X_batch.to(DEVICE, non_blocking=True)
+                y_batch = y_batch.to(DEVICE, non_blocking=True)
+                if use_amp:
+                    with torch.cuda.amp.autocast():
+                        val_loss_b = criterion(model(X_batch), y_batch)
+                else:
+                    val_loss_b = criterion(model(X_batch), y_batch)
+                val_running += val_loss_b.item() * X_batch.size(0)
 
-                    break
+        val_loss = val_running / len(val_loader.dataset)
+        val_losses.append(val_loss)
 
-        save_training_curve(
-            train_losses,
-            val_losses,
+        scheduler.step(epoch + val_loss)   # CosineAnnealing step
+
+        print(
+            f"Epoch {epoch+1:03d}/{EPOCHS} | "
+            f"Train: {train_loss:.5f} | Val: {val_loss:.5f} | "
+            f"LR: {optimizer.param_groups[0]['lr']:.2e}"
         )
 
-    # ----------------------------------------------------------------------
-    # Load best model
-    # ----------------------------------------------------------------------
+        if val_loss < best_val_loss:
+            best_val_loss    = val_loss
+            patience_counter = 0
+            torch.save(model.state_dict(), model_path)
+        else:
+            patience_counter += 1
+            if patience_counter >= PATIENCE:
+                print("\nEarly stopping triggered.")
+                break
+
+    save_training_curve(train_losses, val_losses)
+
+    # ------------------------------------------------------------------
+    # Load best, tune threshold on val, evaluate on test
+    # ------------------------------------------------------------------
 
     print("\nLoading best model ...")
+    model.load_state_dict(torch.load(model_path, map_location=DEVICE, weights_only=True))
 
-    model.load_state_dict(
+    # Collect val probabilities for threshold search
+    print("\nFinding optimal decision threshold on validation set ...")
+    model.eval()
+    val_probs, val_true = [], []
+    with torch.no_grad():
+        for X_batch, y_batch in val_loader:
+            X_batch = X_batch.to(DEVICE, non_blocking=True)
+            probs   = torch.sigmoid(model(X_batch))
+            val_probs.extend(probs.cpu().numpy())
+            val_true.extend(y_batch.numpy())
 
-        torch.load(
-            model_path,
-            map_location=DEVICE,
-            weights_only=True
-        )
-    )
+    val_probs = np.array(val_probs, dtype=np.float32)
+    val_true  = np.array(val_true,  dtype=np.int32)
 
-    # ----------------------------------------------------------------------
-    # Evaluation
-    # ----------------------------------------------------------------------
+    threshold, fbeta_val = find_optimal_threshold(val_true, val_probs)
+    print(f"  Threshold: {threshold:.3f}  (F{FBETA:.0f} on val = {fbeta_val:.4f})")
 
-    print("\nEvaluating forecasting model ...")
+    # ------------------------------------------------------------------
+    # Test evaluation
+    # ------------------------------------------------------------------
 
-    (
-        metrics,
-        y_true,
-        y_pred,
-        y_probs,
-    ) = evaluate_model(
-        model,
-        test_loader,
-    )
+    print("\nEvaluating on test set ...")
+    metrics, y_true, y_pred, y_probs = evaluate_model(model, test_loader, threshold)
 
-    # ----------------------------------------------------------------------
-    # Save outputs
-    # ----------------------------------------------------------------------
+    with open(METRICS_DIR / "forecast_metrics.json", "w", encoding="utf-8") as f:
+        json.dump(metrics, f, indent=4)
 
-    METRICS_DIR.mkdir(
-        parents=True,
-        exist_ok=True
-    )
+    save_confusion_matrix(y_true, y_pred)
+    save_roc_curve(y_true, y_probs)
 
-    PLOTS_DIR.mkdir(
-        parents=True,
-        exist_ok=True
-    )
-
-    with open(
-        METRICS_DIR / "forecast_metrics.json",
-        "w",
-        encoding="utf-8"
-    ) as f:
-
-        json.dump(
-            metrics,
-            f,
-            indent=4
-        )
-
-    save_confusion_matrix(
-        y_true,
-        y_pred,
-    )
-
-    save_roc_curve(
-        y_true,
-        y_probs,
-    )
-
-    # ----------------------------------------------------------------------
+    # ------------------------------------------------------------------
 
     print("\n" + "=" * 72)
-    print("LSTM FORECASTING COMPLETE")
+    print("BiLSTM + ATTENTION FORECASTING COMPLETE")
     print("=" * 72)
-
     print("\nMetrics:")
-
     for k, v in metrics.items():
-
-        print(
-            f"  {k:<24} {v:.6f}"
-        )
-
-    print("\nSaved:")
-    print("  models_lstm/")
-    print("  reports_lstm/")
-
-    print("\nMost important metric:")
-    print("  class_1_recall")
-
+        print(f"  {k:<24} {v}")
+    print("\nKey metrics:")
+    print(f"  class_1_recall (hazard recall) : {metrics.get('class_1_recall'):.4f}")
+    print(f"  false_negatives                : {metrics.get('false_negatives')}")
+    print("\nSaved:  models_lstm/  reports_lstm/")
     print("\nDONE.\n")
+
 
 # ============================================================================
 # Entry point
 # ============================================================================
 
 if __name__ == "__main__":
-
-    parser = argparse.ArgumentParser(
-        description="Phase 7 — LSTM Forecasting"
-    )
-
-    args = parser.parse_args()
-
+    import argparse
+    parser = argparse.ArgumentParser(description="Phase 7 — BiLSTM Attention Forecaster")
+    parser.parse_args()
     main()
