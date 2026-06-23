@@ -90,7 +90,7 @@ GAT_HEADS       = 4
 TEMPORAL_HIDDEN = 128
 GRU_LAYERS      = 2
 ATTN_HEADS      = 4       # temporal attention heads
-DROPOUT         = 0.3
+DROPOUT         = 0.4
 GRAD_CLIP       = 1.0
 FBETA           = 2.0     # β for threshold search
 
@@ -141,7 +141,7 @@ class ImprovedSTGNN(nn.Module):
             dropout=dropout,
             concat=True,                 # output: graph_hidden
         )
-        self.bn1 = nn.BatchNorm1d(graph_hidden)
+        self.bn1 = nn.LayerNorm(graph_hidden)   # LayerNorm: same behaviour at train/eval
 
         # ----------------------------------------------------------
         # GAT layer 2:  graph_hidden → graph_hidden  (single head)
@@ -153,7 +153,7 @@ class ImprovedSTGNN(nn.Module):
             dropout=dropout,
             concat=False,
         )
-        self.bn2 = nn.BatchNorm1d(graph_hidden)
+        self.bn2 = nn.LayerNorm(graph_hidden)
 
         # ----------------------------------------------------------
         # Temporal: GRU
@@ -436,7 +436,7 @@ def main():
     pos_weight_tensor = torch.tensor(pos_weight_val, dtype=torch.float32).to(DEVICE)
     criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight_tensor)
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE, weight_decay=1e-5)
+    optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE, weight_decay=1e-4)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, mode="min", factor=0.5, patience=5, min_lr=1e-6, verbose=True,
     )
