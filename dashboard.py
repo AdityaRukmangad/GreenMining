@@ -26,64 +26,76 @@ st.set_page_config(
 
 # ─── Design tokens ────────────────────────────────────────────────────────────
 BG      = "#0a0c10"
-CARD    = "#12151c"
-BORDER  = "#1e2330"
-GREEN   = "#00e5a0"
-RED     = "#ff4757"
-ORANGE  = "#ffa502"
+CARD    = "#11141c"
+BORDER  = "#222736"
+GREEN   = "#00f0ff"
+RED     = "#ff3366"
+ORANGE  = "#ff9900"
 BLUE    = "#3d8ef0"
-PURPLE  = "#a78bfa"
-TEXT    = "#e2e8f0"
-MUTED   = "#64748b"
+PURPLE  = "#c77dff"
+TEXT    = "#f8fafc"
+MUTED   = "#8ba3cb"
 
 HAZARD_CS = [[0.0, GREEN], [0.4, ORANGE], [0.7, "#ff6b35"], [1.0, RED]]
 
-# ─── CSS (minimal, targeted) ──────────────────────────────────────────────────
+# ─── CSS (modern, glassmorphism, dynamic) ─────────────────────────────────────
 st.markdown(f"""
 <style>
   /* Hide Streamlit chrome */
   #MainMenu, footer, header {{ visibility: hidden; }}
-  .block-container {{ padding: 1.5rem 2rem 1rem; max-width: 1440px; }}
+  .block-container {{ padding: 2rem 3rem 1.5rem; max-width: 1500px; }}
 
-  /* Sidebar */
+  /* Sidebar styling */
   section[data-testid="stSidebar"] > div:first-child {{
-    background: {CARD};
+    background: linear-gradient(180deg, {CARD} 0%, {BG} 100%);
     border-right: 1px solid {BORDER};
-    padding: 1.5rem 1rem;
+    padding: 2rem 1.5rem;
   }}
 
-  /* Tab strip */
+  /* Modern Tab strip */
   .stTabs [data-baseweb="tab-list"] {{
-    background: {CARD};
+    background: rgba(17, 20, 28, 0.6);
+    backdrop-filter: blur(10px);
     border: 1px solid {BORDER};
-    border-radius: 10px;
-    padding: 4px;
-    gap: 2px;
+    border-radius: 12px;
+    padding: 6px;
+    gap: 4px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
   }}
   .stTabs [data-baseweb="tab"] {{
-    border-radius: 7px;
-    padding: 6px 20px;
+    border-radius: 8px;
+    padding: 8px 24px;
     color: {MUTED};
-    font-size: 13px;
-    font-weight: 500;
+    font-size: 14px;
+    font-weight: 600;
     background: transparent;
+    transition: all 0.2s ease-in-out;
+  }}
+  .stTabs [data-baseweb="tab"]:hover {{
+    color: {TEXT};
+    background: rgba(255,255,255,0.03);
   }}
   .stTabs [aria-selected="true"] {{
     background: {BORDER};
     color: {TEXT};
+    box-shadow: 0 2px 8px rgba(0,0,0,0.2);
   }}
 
-  /* Download button */
+  /* Elevated buttons */
   .stDownloadButton > button {{
-    background: {CARD};
+    background: linear-gradient(90deg, {CARD}, {BORDER});
     border: 1px solid {BORDER};
     color: {TEXT};
-    border-radius: 8px;
-    font-size: 13px;
+    border-radius: 10px;
+    font-size: 14px;
+    font-weight: 600;
+    transition: all 0.3s ease;
   }}
   .stDownloadButton > button:hover {{
     border-color: {GREEN};
     color: {GREEN};
+    box-shadow: 0 0 15px rgba(0, 240, 255, 0.2);
+    transform: translateY(-1px);
   }}
 </style>
 """, unsafe_allow_html=True)
@@ -142,11 +154,8 @@ def load_test_data(n: int) -> pd.DataFrame:
 @st.cache_data(show_spinner=False)
 def build_pred_df(_pred, cache_key: str, df_json: str,
                   model: str, thresh: float) -> pd.DataFrame:
-    """
-    Run inference and return a single clean DataFrame with:
-      zone_name, hazard_prob, hazard_pred  (plus all engineered columns)
-    """
-    df_raw = pd.read_json(df_json, orient="split")
+    import io
+    df_raw = pd.read_json(io.StringIO(df_json), orient="split")
 
     if _pred is None:
         df_raw["zone_name"]  = "Unknown"
@@ -160,33 +169,44 @@ def build_pred_df(_pred, cache_key: str, df_json: str,
     # ── Decode zones ──────────────────────────────────────────────────────────
     df["zone_name"] = decode_zones(df)
 
-    # ── Attach RF predictions ─────────────────────────────────────────────────
-    rf_out = (results.get("baseline", {})
-                     .get("binary", {})
-                     .get("random_forest", {}))
-    if rf_out and rf_out.get("proba") is not None:
-        df["rf_prob"] = rf_out["proba"][:, 1].astype(np.float32)
-        df["rf_pred"] = rf_out["pred"].astype(np.int8)
-    else:
-        df["rf_prob"] = 0.5
-        df["rf_pred"] = 0
+    # ── Attach Baseline predictions ───────────────────────────────────────────
+    for algo in _pred.status().get("baseline_binary", []):
+        algo_name = algo.replace('_', ' ').title()
+        out = results.get("baseline", {}).get("binary", {}).get(algo, {})
+        if out and out.get("proba") is not None:
+            df[f"{algo_name}_prob"] = out["proba"][:, 1].astype(np.float32)
+            df[f"{algo_name}_pred"] = out["pred"].astype(np.int8)
+        else:
+            df[f"{algo_name}_prob"] = 0.5
+            df[f"{algo_name}_pred"] = 0
 
     # ── Attach LSTM predictions ───────────────────────────────────────────────
-    df["lstm_prob"] = np.nan
+    df["LSTM Forecast_prob"] = np.nan
     lstm = results.get("lstm")
     if lstm and "error" not in (lstm or {}):
         df.iloc[lstm["indices"],
-                df.columns.get_loc("lstm_prob")] = lstm["proba"].astype(np.float32)
+                df.columns.get_loc("LSTM Forecast_prob")] = lstm["proba"].astype(np.float32)
+    df["LSTM Forecast_pred"] = np.where(df["LSTM Forecast_prob"].fillna(0) >= thresh, 1, 0)
 
-    df["lstm_pred"] = np.where(df["lstm_prob"].fillna(0) >= thresh, 1, 0)
+    # ── Attach STGNN predictions ──────────────────────────────────────────────
+    df["STGNN_prob"] = np.nan
+    stgnn = results.get("stgnn")
+    if stgnn and "error" not in (stgnn or {}):
+        df.iloc[stgnn["indices"],
+                df.columns.get_loc("STGNN_prob")] = stgnn["proba"].astype(np.float32)
+    df["STGNN_pred"] = np.where(df["STGNN_prob"].fillna(0) >= thresh, 1, 0)
 
     # ── Choose primary probability for all charts ─────────────────────────────
-    if model == "LSTM" and df["lstm_prob"].notna().any():
-        df["hazard_prob"] = df["lstm_prob"].fillna(df["rf_prob"])
+    prob_col = f"{model}_prob"
+    if prob_col in df.columns and df[prob_col].notna().any():
+        df["hazard_prob"] = df[prob_col]
+        if "Forecast" in model or model == "STGNN":
+            fallback = df.get("Random Forest_prob", pd.Series(0.0, index=df.index))
+            df["hazard_prob"] = df["hazard_prob"].fillna(fallback)
         df["hazard_pred"] = np.where(df["hazard_prob"] >= thresh, 1, 0).astype(np.int8)
     else:
-        df["hazard_prob"] = df["rf_prob"]
-        df["hazard_pred"] = df["rf_pred"]
+        df["hazard_prob"] = 0.5
+        df["hazard_pred"] = 0
 
     return df
 
@@ -288,7 +308,7 @@ def chart_3d(df: pd.DataFrame) -> go.Figure:
         hovertemplate=hover,
     ))
     fig.update_layout(
-        **_layout(height=560),
+        **_layout(height=560, margin=dict(t=8, b=0, l=0, r=0)),
         scene=dict(
             xaxis=dict(title="X — Length (m)",
                        backgroundcolor="rgba(0,0,0,0)", gridcolor=BORDER),
@@ -300,7 +320,6 @@ def chart_3d(df: pd.DataFrame) -> go.Figure:
             aspectmode="data",
             camera=dict(eye=dict(x=1.7, y=-1.5, z=0.85)),
         ),
-        margin=dict(t=8, b=0, l=0, r=0),
     )
     return fig
 
@@ -534,7 +553,7 @@ def chart_radar(saved: dict) -> go.Figure:
             fig.add_trace(go.Scatterpolar(
                 r=vals, theta=angles, fill="toself",
                 name=name, line_color=clr,
-                fillcolor=clr.replace("#", "rgba(")[:-1] + ", .08)" if clr.startswith("#") else clr,
+                fillcolor=f"rgba({int(clr[1:3], 16)}, {int(clr[3:5], 16)}, {int(clr[5:7], 16)}, 0.08)",
             ))
             idx += 1
         else:
@@ -553,7 +572,7 @@ def chart_radar(saved: dict) -> go.Figure:
                     break
 
     fig.update_layout(
-        **_layout(height=400),
+        **_layout(height=400, margin=dict(t=44, b=20, l=20, r=150)),
         polar=dict(
             bgcolor="rgba(0,0,0,0)",
             radialaxis=dict(visible=True, range=[0, 1],
@@ -562,7 +581,6 @@ def chart_radar(saved: dict) -> go.Figure:
         ),
         legend=dict(x=1.08, y=0.5, bgcolor="rgba(0,0,0,0)", font=dict(size=10)),
         title=dict(text="Performance Radar — All Models", font=dict(size=13), x=0),
-        margin=dict(t=44, b=20, l=20, r=150),
     )
     return fig
 
@@ -570,34 +588,36 @@ def chart_radar(saved: dict) -> go.Figure:
 # ─── HTML helpers ─────────────────────────────────────────────────────────────
 def kpi(label: str, value: str, sub: str = "", color: str = TEXT) -> str:
     return f"""
-<div style="background:{CARD};border:1px solid {BORDER};border-radius:12px;
-            padding:20px 16px;text-align:center;height:100%;">
-  <div style="color:{MUTED};font-size:10.5px;text-transform:uppercase;
-              letter-spacing:1.3px;margin-bottom:10px;">{label}</div>
-  <div style="color:{color};font-size:32px;font-weight:700;
-              line-height:1.1;">{value}</div>
-  <div style="color:{MUTED};font-size:11px;margin-top:7px;">{sub}</div>
+<div style="background:linear-gradient(145deg, {CARD}, {BG});border:1px solid {BORDER};border-radius:16px;
+            padding:24px 20px;text-align:center;height:100%;box-shadow:0 8px 24px rgba(0,0,0,0.2);
+            transition:transform 0.3s ease;">
+  <div style="color:{MUTED};font-size:11px;text-transform:uppercase;
+              letter-spacing:1.5px;margin-bottom:12px;font-weight:600;">{label}</div>
+  <div style="color:{color};font-size:36px;font-weight:800;
+              line-height:1.1;text-shadow: 0 0 10px {color}40;">{value}</div>
+  <div style="color:{MUTED};font-size:12px;margin-top:8px;">{sub}</div>
 </div>"""
 
 
 def status_bar(pct: float, n_haz: int, n_total: int) -> str:
     if pct < 0.15:
         bg, border, color, icon, label = \
-            "rgba(0,229,160,.08)", GREEN, GREEN, "✅", "SAFE"
+            "rgba(0,240,255,.08)", GREEN, GREEN, "✅", "SAFE"
     elif pct < 0.40:
         bg, border, color, icon, label = \
-            "rgba(255,165,2,.10)", ORANGE, ORANGE, "⚠️", "WARNING"
+            "rgba(255,153,0,.10)", ORANGE, ORANGE, "⚠️", "WARNING"
     else:
         bg, border, color, icon, label = \
-            "rgba(255,71,87,.12)", RED, RED, "🚨", "DANGER"
+            "rgba(255,51,102,.12)", RED, RED, "🚨", "DANGER"
 
     return f"""
-<div style="background:{bg};border:1.5px solid {border};border-radius:12px;
-            padding:18px 28px;text-align:center;margin-bottom:20px;">
-  <span style="color:{color};font-size:26px;font-weight:800;
-               letter-spacing:4px;">{icon} &nbsp; {label}</span>
-  <span style="color:{MUTED};font-size:14px;margin-left:20px;">
-    {n_haz:,} hazard cells &nbsp;/&nbsp; {n_total:,} total
+<div style="background:{bg};border:1.5px solid {border};border-radius:16px;
+            padding:22px 30px;text-align:center;margin-bottom:24px;
+            box-shadow: 0 0 20px {color}20; backdrop-filter: blur(5px);">
+  <span style="color:{color};font-size:28px;font-weight:800;
+               letter-spacing:4px;text-shadow: 0 0 10px {color}60;">{icon} &nbsp; {label}</span>
+  <span style="color:{MUTED};font-size:15px;margin-left:24px;font-weight:500;">
+    <b style="color:{TEXT}">{n_haz:,}</b> hazard cells &nbsp;/&nbsp; {n_total:,} total
     &nbsp;·&nbsp; <b style="color:{color}">{pct:.1%}</b> coverage
   </span>
 </div>"""
@@ -617,21 +637,21 @@ def section(title: str) -> None:
 def render_sidebar():
     with st.sidebar:
         st.markdown(f"""
-        <div style="margin-bottom:24px;">
-          <div style="font-size:20px;font-weight:700;color:{GREEN};
-                      letter-spacing:.5px;">⛏ GreenMining</div>
-          <div style="font-size:11px;color:{MUTED};letter-spacing:1px;
-                      text-transform:uppercase;margin-top:3px;">
+        <div style="margin-bottom:30px;">
+          <div style="font-size:24px;font-weight:800;color:{GREEN};
+                      letter-spacing:1px;text-shadow: 0 0 10px {GREEN}40;">⛏ GreenMining</div>
+          <div style="font-size:12px;color:{MUTED};letter-spacing:2px;
+                      text-transform:uppercase;margin-top:4px;font-weight:600;">
             Safety Intelligence
           </div>
         </div>
         """, unsafe_allow_html=True)
 
         st.markdown(
-            f'<div style="color:{MUTED};font-size:10.5px;font-weight:600;'
-            f'text-transform:uppercase;letter-spacing:1.2px;'
-            f'border-bottom:1px solid {BORDER};padding-bottom:5px;'
-            f'margin-bottom:12px;">Data Source</div>',
+            f'<div style="color:{MUTED};font-size:11px;font-weight:700;'
+            f'text-transform:uppercase;letter-spacing:1.5px;'
+            f'border-bottom:1px solid {BORDER};padding-bottom:6px;'
+            f'margin-bottom:14px;">Data Source</div>',
             unsafe_allow_html=True,
         )
 
@@ -651,16 +671,28 @@ def render_sidebar():
         else:
             n_rows = st.slider("Sample size", 1000, 12000, 6000, 1000)
 
+        # Get available models dynamically
+        pred = get_predictor()
+        available_models = []
+        if pred:
+            s = pred.status()
+            for m in s.get("baseline_binary", []):
+                available_models.append(m.replace('_', ' ').title())
+            if s.get("lstm"): available_models.append("LSTM Forecast")
+            if s.get("stgnn"): available_models.append("STGNN")
+        if not available_models:
+            available_models = ["Random Forest"]
+
         st.markdown(
-            f'<div style="color:{MUTED};font-size:10.5px;font-weight:600;'
-            f'text-transform:uppercase;letter-spacing:1.2px;'
-            f'border-bottom:1px solid {BORDER};padding-bottom:5px;'
-            f'margin:20px 0 12px;">Prediction Model</div>',
+            f'<div style="color:{MUTED};font-size:11px;font-weight:700;'
+            f'text-transform:uppercase;letter-spacing:1.5px;'
+            f'border-bottom:1px solid {BORDER};padding-bottom:6px;'
+            f'margin:24px 0 14px;">Prediction Model</div>',
             unsafe_allow_html=True,
         )
 
         model = st.selectbox(
-            "Primary model", ["Random Forest", "LSTM"],
+            "Primary model", available_models,
             label_visibility="collapsed",
         )
         thresh = st.slider(
@@ -669,39 +701,38 @@ def render_sidebar():
         )
 
         # Model status
-        pred = get_predictor()
         st.markdown(
-            f'<div style="color:{MUTED};font-size:10.5px;font-weight:600;'
-            f'text-transform:uppercase;letter-spacing:1.2px;'
-            f'border-bottom:1px solid {BORDER};padding-bottom:5px;'
-            f'margin:20px 0 12px;">Model Status</div>',
+            f'<div style="color:{MUTED};font-size:11px;font-weight:700;'
+            f'text-transform:uppercase;letter-spacing:1.5px;'
+            f'border-bottom:1px solid {BORDER};padding-bottom:6px;'
+            f'margin:24px 0 14px;">Model Status</div>',
             unsafe_allow_html=True,
         )
         if pred:
-            s = pred.status()
-            items = [
-                ("Random Forest",  bool(s.get("baseline_binary"))),
-                ("LSTM Forecast",  s.get("lstm", False)),
-                ("STGNN",          s.get("stgnn", False)),
-            ]
+            items = []
+            for m in s.get("baseline_binary", []):
+                items.append((m.replace('_', ' ').title(), True))
+            items.append(("LSTM Forecast", s.get("lstm", False)))
+            items.append(("STGNN", s.get("stgnn", False)))
+            
             for name, ok in items:
-                ico = f'<span style="color:{GREEN}">●</span>' if ok \
-                      else f'<span style="color:{BORDER}">●</span>'
+                ico = f'<span style="color:{GREEN};text-shadow:0 0 5px {GREEN};">●</span>' if ok \
+                      else f'<span style="color:{RED};">●</span>'
                 clr = TEXT if ok else MUTED
                 st.markdown(
-                    f'<div style="font-size:12px;color:{clr};'
-                    f'margin-bottom:6px;">{ico} &nbsp;{name}</div>',
+                    f'<div style="font-size:13px;color:{clr};font-weight:500;'
+                    f'margin-bottom:8px;">{ico} &nbsp;{name}</div>',
                     unsafe_allow_html=True,
                 )
             dev = s.get("device", "cpu")
             st.markdown(
-                f'<div style="font-size:11px;color:{MUTED};margin-top:8px;">'
-                f'Device: {dev}</div>',
+                f'<div style="font-size:11.5px;color:{MUTED};margin-top:12px;font-weight:600;">'
+                f'Hardware: {dev.upper()}</div>',
                 unsafe_allow_html=True,
             )
         else:
             st.markdown(
-                f'<div style="color:{RED};font-size:12px;">⚠ Predictor unavailable</div>',
+                f'<div style="color:{RED};font-size:13px;font-weight:600;">⚠ Predictor unavailable</div>',
                 unsafe_allow_html=True,
             )
 
@@ -713,7 +744,7 @@ def tab_overview(df: pd.DataFrame, pct: float, n_haz: int):
     c_gauge, c_pie = st.columns([1, 1], gap="medium")
 
     with c_gauge:
-        st.plotly_chart(chart_gauge(pct), use_container_width=True, key="gauge")
+        st.plotly_chart(chart_gauge(pct), width="stretch", key="gauge")
 
         section("Top Risk Cells")
         top = df.nlargest(8, "hazard_prob")[["x", "y", "z", "hazard_prob", "zone_name"]]
@@ -755,18 +786,17 @@ def tab_overview(df: pd.DataFrame, pct: float, n_haz: int):
         ))
         clr_label = RED if pct >= .4 else (ORANGE if pct >= .15 else GREEN)
         fig_pie.update_layout(
-            **_layout(height=300),
+            **_layout(height=300, margin=dict(t=44, b=10, l=10, r=10)),
             title=dict(text="Cell Distribution by Zone", font=dict(size=13), x=0),
             showlegend=True,
             legend=dict(font=dict(size=10), bgcolor="rgba(0,0,0,0)"),
-            margin=dict(t=44, b=10, l=10, r=10),
             annotations=[dict(
                 text=f"<b style='color:{clr_label}'>{pct:.0%}</b><br>hazard",
                 font=dict(size=14, color=clr_label),
                 showarrow=False,
             )],
         )
-        st.plotly_chart(fig_pie, use_container_width=True, key="pie")
+        st.plotly_chart(fig_pie, width="stretch", key="pie")
 
         # Gas violin (safe vs hazard)
         gases = [g for g in ["CH4", "CO", "H2"] if g in df.columns]
@@ -787,7 +817,7 @@ def tab_overview(df: pd.DataFrame, pct: float, n_haz: int):
                             y=sub, name=cls,
                             legendgroup=cls, showlegend=(i == 1),
                             line_color=clr,
-                            fillcolor=clr + "20",
+                            fillcolor=f"rgba({int(clr[1:3], 16)}, {int(clr[3:5], 16)}, {int(clr[5:7], 16)}, 0.15)",
                             box_visible=True,
                             meanline_visible=True,
                         ),
@@ -798,28 +828,28 @@ def tab_overview(df: pd.DataFrame, pct: float, n_haz: int):
                 title=dict(text="", font=dict(size=13)),
                 violingap=0.15, violingroupgap=0.05,
             )
-            st.plotly_chart(fig_v, use_container_width=True, key="violin")
+            st.plotly_chart(fig_v, width="stretch", key="violin")
 
 
 def tab_minemap(df: pd.DataFrame):
-    st.plotly_chart(chart_3d(df), use_container_width=True, key="3d")
+    st.plotly_chart(chart_3d(df), width="stretch", key="3d")
     section("Top-View Plan (XY Heatmap)")
-    st.plotly_chart(chart_heatmap(df), use_container_width=True, key="hm")
+    st.plotly_chart(chart_heatmap(df), width="stretch", key="hm")
 
 
 def tab_temporal(df: pd.DataFrame):
     if "Time" not in df.columns:
         st.info("No Time column in the data.")
         return
-    st.plotly_chart(chart_temporal(df), use_container_width=True, key="temp")
+    st.plotly_chart(chart_temporal(df), width="stretch", key="temp")
     section("Gas Concentrations Over Time")
-    st.plotly_chart(chart_gas_time(df), use_container_width=True, key="gas_t")
+    st.plotly_chart(chart_gas_time(df), width="stretch", key="gas_t")
 
 
 def tab_zones(df: pd.DataFrame):
     c1, c2 = st.columns([1.1, 1], gap="medium")
     with c1:
-        st.plotly_chart(chart_zone_bar(df), use_container_width=True, key="zbar")
+        st.plotly_chart(chart_zone_bar(df), width="stretch", key="zbar")
     with c2:
         section("Zone Risk Summary")
         zt = (df.groupby("zone_name")["hazard_prob"]
@@ -832,7 +862,7 @@ def tab_zones(df: pd.DataFrame):
                 .sort_values("Avg_Prob", ascending=False))
         zt["Hazard %"] = (zt["Hazard_Cells"] / zt["Cells"] * 100).round(1)
         zt[["Avg_Prob", "Max_Prob"]] = zt[["Avg_Prob","Max_Prob"]].round(4)
-        st.dataframe(zt, use_container_width=True, hide_index=True,
+        st.dataframe(zt, width="stretch", hide_index=True,
                      column_config={
                          "Avg_Prob": st.column_config.ProgressColumn(
                              "Avg Prob", format="%.4f", min_value=0, max_value=1),
@@ -841,7 +871,7 @@ def tab_zones(df: pd.DataFrame):
                      })
 
     section("Hazard Profile Along Tunnel Axis")
-    st.plotly_chart(chart_x_profile(df), use_container_width=True, key="xprofile")
+    st.plotly_chart(chart_x_profile(df), width="stretch", key="xprofile")
 
 
 def tab_benchmarks():
@@ -850,11 +880,11 @@ def tab_benchmarks():
         st.info("No saved metrics found. Run the training scripts first.")
         return
 
-    st.plotly_chart(chart_benchmark(saved), use_container_width=True, key="bench")
+    st.plotly_chart(chart_benchmark(saved), width="stretch", key="bench")
 
     c1, c2 = st.columns([1, 1.1], gap="medium")
     with c1:
-        st.plotly_chart(chart_radar(saved), use_container_width=True, key="radar")
+        st.plotly_chart(chart_radar(saved), width="stretch", key="radar")
     with c2:
         section("Detailed Metrics Table")
         rows = []
@@ -868,7 +898,7 @@ def tab_benchmarks():
                     "Precision": round(m.get("class_1_precision", 0), 4),
                     "F1 Macro":  round(m.get("f1_macro", 0), 4),
                     "ROC-AUC":   round(m.get("roc_auc", 0), 4),
-                    "False Neg": m.get("false_negatives", "—"),
+                    "False Neg": m.get("false_negatives", None),
                 })
             else:
                 for algo, m in data.get("binary", {}).items():
@@ -879,10 +909,10 @@ def tab_benchmarks():
                         "Precision": round(m.get("class_1_precision", 0), 4),
                         "F1 Macro":  round(m.get("f1_macro", 0), 4),
                         "ROC-AUC":   round(m.get("roc_auc", 0), 4),
-                        "False Neg": m.get("false_negatives", "—"),
+                        "False Neg": m.get("false_negatives", None),
                     })
         if rows:
-            st.dataframe(pd.DataFrame(rows), use_container_width=True,
+            st.dataframe(pd.DataFrame(rows), width="stretch",
                          hide_index=True,
                          column_config={
                              "Recall": st.column_config.ProgressColumn(
@@ -923,7 +953,7 @@ def tab_data(df: pd.DataFrame):
 
     st.dataframe(
         disp.round(5).reset_index(drop=True),
-        use_container_width=True,
+        width="stretch",
         height=500,
         column_config={
             "hazard_prob": st.column_config.ProgressColumn(
@@ -939,13 +969,15 @@ def main():
 
     # ── Header ────────────────────────────────────────────────────────────────
     st.markdown(f"""
-    <div style="display:flex;align-items:center;gap:16px;margin-bottom:4px;">
+    <div style="display:flex;align-items:center;gap:20px;margin-bottom:8px;
+                background: linear-gradient(90deg, {CARD}, transparent); padding: 20px; border-radius: 16px;">
       <div>
-        <h1 style="color:{GREEN};margin:0;font-size:22px;font-weight:800;
-                   letter-spacing:.3px;line-height:1.2;">
+        <h1 style="background: -webkit-linear-gradient(45deg, {GREEN}, {BLUE});
+                   -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+                   margin:0;font-size:32px;font-weight:900;letter-spacing:0.5px;line-height:1.2; text-shadow: 0 0 30px {GREEN}40;">
           ⛏ &nbsp; GreenMining Safety Intelligence
         </h1>
-        <p style="color:{MUTED};margin:4px 0 0;font-size:12px;letter-spacing:.3px;">
+        <p style="color:{MUTED};margin:8px 0 0;font-size:14px;letter-spacing:0.5px;font-weight:500;">
           Underground mine hazard prediction &nbsp;·&nbsp;
           OpenFOAM CFD &nbsp;·&nbsp; RF &nbsp;·&nbsp; BiLSTM &nbsp;·&nbsp; STGNN
         </p>
@@ -1041,7 +1073,7 @@ def _show_benchmark_only():
           No data loaded — showing saved training metrics below.
         </div>
         """, unsafe_allow_html=True)
-        st.plotly_chart(chart_benchmark(saved), use_container_width=True)
+        st.plotly_chart(chart_benchmark(saved), width="stretch")
 
 
 # ─────────────────────────────────────────────────────────────────────────────

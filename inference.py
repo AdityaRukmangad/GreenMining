@@ -534,12 +534,16 @@ class GreenMiningPredictor:
                 "a torch.save({'mean': feat_mean, 'std': feat_std}, ...) call."
             )
 
-        n_feat = len(feat_cols) if feat_cols else 38
+        n_feat = len(feat_cols) + 4 if feat_cols else 42
         net    = STGNNClass(input_dim=n_feat)
-        net.load_state_dict(
-            torch.load(model_path, map_location=self.device, weights_only=True)
-        )
-        net.to(self.device).eval()
+        try:
+            net.load_state_dict(
+                torch.load(model_path, map_location=self.device, weights_only=True)
+            )
+            net.to(self.device).eval()
+        except Exception as exc:
+            warnings.warn(f"STGNN failed to load state dict: {exc}")
+            return None
 
         return {"net": net, "norm_stats": norm_stats, "feature_cols": feat_cols}
 
@@ -786,9 +790,14 @@ class GreenMiningPredictor:
 
         # ── Assemble graph ────────────────────────────────────────────────────
         x_t = torch.tensor(node_x, dtype=torch.float32)  # [N, T, F]
+        
+        # Append 4 spatial dimensions (zeros, approximating each node as its own centre)
+        N_nodes, T_steps, F_dim = x_t.shape
+        spatial_zeros = torch.zeros((N_nodes, T_steps, 4), dtype=torch.float32)
+        x_t = torch.cat([x_t, spatial_zeros], dim=-1)
 
         if norm_stats is not None:
-            mean = norm_stats["mean"].unsqueeze(0).unsqueeze(0)  # [1, 1, F]
+            mean = norm_stats["mean"].unsqueeze(0).unsqueeze(0)  # [1, 1, F+4]
             std  = norm_stats["std"].unsqueeze(0).unsqueeze(0)
             x_t  = (x_t - mean) / std
 
